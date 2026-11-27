@@ -317,14 +317,46 @@ async function emitNotification(
     'support.amanat@gmail.com';
 
   let subs: NotificationSubscription[] = [];
+  const dbDiscoveredEmails: string[] = [];
+
   if (supabase) {
     const query = supabase.from('notification_subscriptions').select('*');
     if (partial.campaign_id) {
       const { data } = await query.eq('campaign_id', partial.campaign_id);
       subs = (data ?? []) as NotificationSubscription[];
+      if (partial.audience === 'donor' || partial.audience === 'both') {
+        const { data: dons } = await supabase
+          .from('donations')
+          .select('donor_email')
+          .eq('campaign_id', partial.campaign_id);
+        for (const d of (dons ?? []) as Array<{ donor_email?: string | null }>) {
+          if (d.donor_email) dbDiscoveredEmails.push(d.donor_email);
+        }
+      }
     } else if (partial.case_id) {
       const { data } = await query.eq('case_id', partial.case_id);
       subs = (data ?? []) as NotificationSubscription[];
+      if (partial.audience === 'donor' || partial.audience === 'both') {
+        const { data: dons } = await supabase
+          .from('donations')
+          .select('donor_email')
+          .eq('case_id', partial.case_id);
+        for (const d of (dons ?? []) as Array<{ donor_email?: string | null }>) {
+          if (d.donor_email) dbDiscoveredEmails.push(d.donor_email);
+        }
+      }
+      if (partial.audience === 'beneficiary' || partial.audience === 'both') {
+        const { data: cRow } = await supabase
+          .from('cases')
+          .select('beneficiary_account_email')
+          .eq('id', partial.case_id)
+          .maybeSingle();
+        if (cRow && (cRow as { beneficiary_account_email?: string | null }).beneficiary_account_email) {
+          dbDiscoveredEmails.push(
+            (cRow as { beneficiary_account_email: string }).beneficiary_account_email
+          );
+        }
+      }
     }
   } else {
     if (partial.campaign_id) {
@@ -345,16 +377,26 @@ async function emitNotification(
     return s.role === partial.audience;
   });
 
-  const emails = [
-    ...extraEmails,
-    ...filteredSubs.map((s) => s.email ?? ''),
-    senderEmail,
-  ].filter(Boolean);
+  const emails = Array.from(
+    new Set(
+      [
+        ...extraEmails,
+        ...dbDiscoveredEmails,
+        ...filteredSubs.map((s) => s.email ?? ''),
+        senderEmail,
+      ]
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => e.includes('@'))
+    )
+  );
 
-  const telegramIds = [
-    ...extraTelegramIds,
-    ...filteredSubs.map((s) => s.telegram_chat_id ?? ''),
-  ].filter(Boolean);
+  const telegramIds = Array.from(
+    new Set(
+      [...extraTelegramIds, ...filteredSubs.map((s) => s.telegram_chat_id ?? '')]
+        .map((t) => t.trim())
+        .filter(Boolean)
+    )
+  );
 
   const record = createNotificationRecord({
     ...partial,
@@ -592,16 +634,47 @@ export const dataClient = {
 
   async uploadCampaignPaidReceipt(id: string, receiptUrl: string): Promise<void> {
     await ensureLocalSeeded();
+    const uploadedReceipt = await uploadMediaToStorage(receiptUrl, 'receipts');
+    const finalReceipt = uploadedReceipt ?? receiptUrl;
     if (supabase) {
       const { error } = await supabase
         .from('crowdfunding_campaigns')
-        .update({ disbursement_receipt_url: receiptUrl, status: 'disbursed_to_vendor' })
+        .update({ disbursement_receipt_url: finalReceipt, status: 'disbursed_to_vendor' })
         .eq('id', id);
       if (error) throw error;
+      await supabase
+        .from('donations')
+        .update({ status: 'paid_to_vendor' })
+        .eq('campaign_id', id)
+        .eq('status', 'confirmed');
+      const { data: camp } = await supabase
+        .from('crowdfunding_campaigns')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (camp) {
+        const c = camp as CrowdfundingCampaign;
+        await emitNotification({
+          event_type: 'disbursed_to_vendor',
+          audience: 'both',
+          target_code: c.campaign_code,
+          case_id: null,
+          campaign_id: c.id,
+          milestone_pct: 100,
+          title_en: `Paid to Vendor — ${c.title_en}`,
+          title_ur: `وینڈر کو ادائیگی مکمل — ${c.title_ur}`,
+          body_en: `Alhamdulillah! PKR ${c.collected_amount_pkr.toLocaleString('en-PK')} has been paid directly to ${c.vendor_name}. The signed Paid Vendor Receipt is now archived on Amanat.`,
+          body_ur: `الحمدللہ! ${c.collected_amount_pkr.toLocaleString('en-PK')} روپے براہِ راست ${c.vendor_name} کو ادا کر دیے گئے ہیں اور رسید امانت پر محفوظ کر لی گئی ہے۔`,
+          vendor_name: c.vendor_name,
+          district: c.district,
+          collected_pkr: c.collected_amount_pkr,
+          target_pkr: c.target_amount_pkr,
+        });
+      }
       return;
     }
     await localDb.crowdfunding_campaigns.update(id, {
-      disbursement_receipt_url: receiptUrl,
+      disbursement_receipt_url: finalReceipt,
       status: 'disbursed_to_vendor',
     });
     const camp = await localDb.crowdfunding_campaigns.get(id);
@@ -747,6 +820,25 @@ export const dataClient = {
           },
           benEmails
         );
+        const verifierProfile = v as Profile | null;
+        if (verifierProfile?.email) {
+          await emitNotification(
+            {
+              event_type: 'case_submitted',
+              audience: 'both',
+              target_code: (c as WelfareCase).case_code,
+              case_id: (c as WelfareCase).id,
+              campaign_id: null,
+              title_en: `New Field Verification Assigned (${(c as WelfareCase).case_code}) — ${(c as WelfareCase).district}`,
+              title_ur: `نیا فیلڈ وزٹ تفویض کیا گیا (${(c as WelfareCase).case_code})`,
+              body_en: `Assalam-o-Alaikum ${verifierProfile.full_name}, you have been assigned to verify Case ${(c as WelfareCase).case_code} in ${(c as WelfareCase).tehsil}, ${(c as WelfareCase).district} (Vendor: ${(c as WelfareCase).vendor_name}). Open your Field Verifier Portal on Amanat to view confidential address & GPS pin, and show your live 60-second Dynamic QR ID Card to the family during your visit.`,
+              body_ur: `السلام علیکم ${verifierProfile.full_name}، آپ کو کیس ${(c as WelfareCase).case_code} (${(c as WelfareCase).tehsil}، ${(c as WelfareCase).district}) کی تصدیق تفویض کی گئی ہے۔ امانت فیلڈ ویریفائر پورٹل کھول کر خفیہ پتہ دیکھیں اور دورے کے دوران خاندان کو اپنا 60 سیکنڈ والا لائیو کیو آر کارڈ دکھائیں۔`,
+              vendor_name: (c as WelfareCase).vendor_name,
+              district: (c as WelfareCase).district,
+            },
+            [verifierProfile.email]
+          );
+        }
       }
       return;
     }
@@ -993,23 +1085,96 @@ export const dataClient = {
     if (supabase) {
       const { error } = await supabase.from('cases').update({ status: 'approved' }).eq('id', caseId);
       if (error) throw error;
+      const { data: c } = await supabase.from('cases').select('*').eq('id', caseId).maybeSingle();
+      if (c) {
+        const wc = c as WelfareCase;
+        await emitNotification(
+          {
+            event_type: 'case_approved_live',
+            audience: 'beneficiary',
+            target_code: wc.case_code,
+            case_id: wc.id,
+            campaign_id: null,
+            title_en: `Case Approved & Live for Funding (${wc.case_code})`,
+            title_ur: `آپ کا کیس منظور ہو کر فنڈنگ کے لیے لائیو ہو گیا (${wc.case_code})`,
+            body_en: `Alhamdulillah! After ground verification, your request (${wc.case_code}) for PKR ${wc.target_amount_pkr.toLocaleString('en-PK')} via ${wc.vendor_name} is now LIVE on Amanat with 100% privacy protection.`,
+            body_ur: `الحمدللہ! فیلڈ تصدیق کے بعد آپ کی درخواست (${wc.case_code}) مکمل رازداری کے ساتھ امانت پر فنڈنگ کے لیے لائیو کر دی گئی ہے۔`,
+            vendor_name: wc.vendor_name,
+            district: wc.district,
+            collected_pkr: wc.raised_amount_pkr,
+            target_pkr: wc.target_amount_pkr,
+          },
+          wc.beneficiary_account_email ? [wc.beneficiary_account_email] : []
+        );
+      }
       return;
     }
     await localDb.cases.update(caseId, { status: 'approved' });
+    const wc = await localDb.cases.get(caseId);
+    if (wc) {
+      await emitNotification(
+        {
+          event_type: 'case_approved_live',
+          audience: 'beneficiary',
+          target_code: wc.case_code,
+          case_id: wc.id,
+          campaign_id: null,
+          title_en: `Case Approved & Live for Funding (${wc.case_code})`,
+          title_ur: `آپ کا کیس منظور ہو کر فنڈنگ کے لیے لائیو ہو گیا (${wc.case_code})`,
+          body_en: `Alhamdulillah! After ground verification, your request (${wc.case_code}) for PKR ${wc.target_amount_pkr.toLocaleString('en-PK')} via ${wc.vendor_name} is now LIVE on Amanat with 100% privacy protection.`,
+          body_ur: `الحمدللہ! فیلڈ تصدیق کے بعد آپ کی درخواست (${wc.case_code}) مکمل رازداری کے ساتھ امانت پر فنڈنگ کے لیے لائیو کر دی گئی ہے۔`,
+          vendor_name: wc.vendor_name,
+          district: wc.district,
+          collected_pkr: wc.raised_amount_pkr,
+          target_pkr: wc.target_amount_pkr,
+        },
+        wc.beneficiary_account_email ? [wc.beneficiary_account_email] : []
+      );
+    }
   },
 
   async uploadCasePaidReceipt(caseId: string, receiptUrl: string): Promise<void> {
     await ensureLocalSeeded();
+    const uploadedReceipt = await uploadMediaToStorage(receiptUrl, 'receipts');
+    const finalReceipt = uploadedReceipt ?? receiptUrl;
     if (supabase) {
       const { error } = await supabase
         .from('cases')
-        .update({ disbursement_receipt_url: receiptUrl, status: 'disbursed_to_vendor' })
+        .update({ disbursement_receipt_url: finalReceipt, status: 'disbursed_to_vendor' })
         .eq('id', caseId);
       if (error) throw error;
+      await supabase
+        .from('donations')
+        .update({ status: 'paid_to_vendor' })
+        .eq('case_id', caseId)
+        .eq('status', 'confirmed');
+      const { data: c } = await supabase.from('cases').select('*').eq('id', caseId).maybeSingle();
+      if (c) {
+        const wc = c as WelfareCase;
+        await emitNotification(
+          {
+            event_type: 'disbursed_to_vendor',
+            audience: 'both',
+            target_code: wc.case_code,
+            case_id: wc.id,
+            campaign_id: null,
+            milestone_pct: 100,
+            title_en: `Paid to Vendor — Case ${wc.case_code}`,
+            title_ur: `وینڈر کو ادائیگی مکمل — کیس ${wc.case_code}`,
+            body_en: `Alhamdulillah! PKR ${wc.raised_amount_pkr.toLocaleString('en-PK')} for Case ${wc.case_code} has been settled directly with ${wc.vendor_name}. The signed Paid Vendor Receipt is now archived.`,
+            body_ur: `الحمدللہ! کیس ${wc.case_code} کی رقم (${wc.raised_amount_pkr.toLocaleString('en-PK')} روپے) براہِ راست ${wc.vendor_name} کو ادا کر دی گئی ہے اور رسید محفوظ کر لی گئی ہے۔`,
+            vendor_name: wc.vendor_name,
+            district: wc.district,
+            collected_pkr: wc.raised_amount_pkr,
+            target_pkr: wc.target_amount_pkr,
+          },
+          wc.beneficiary_account_email ? [wc.beneficiary_account_email] : []
+        );
+      }
       return;
     }
     await localDb.cases.update(caseId, {
-      disbursement_receipt_url: receiptUrl,
+      disbursement_receipt_url: finalReceipt,
       status: 'disbursed_to_vendor',
     });
     const caseDonations = await localDb.donations.where('case_id').equals(caseId).toArray();
@@ -1017,6 +1182,28 @@ export const dataClient = {
       if (d.status === 'confirmed') {
         await localDb.donations.update(d.id, { status: 'paid_to_vendor' });
       }
+    }
+    const wc = await localDb.cases.get(caseId);
+    if (wc) {
+      await emitNotification(
+        {
+          event_type: 'disbursed_to_vendor',
+          audience: 'both',
+          target_code: wc.case_code,
+          case_id: wc.id,
+          campaign_id: null,
+          milestone_pct: 100,
+          title_en: `Paid to Vendor — Case ${wc.case_code}`,
+          title_ur: `وینڈر کو ادائیگی مکمل — کیس ${wc.case_code}`,
+          body_en: `Alhamdulillah! PKR ${wc.raised_amount_pkr.toLocaleString('en-PK')} for Case ${wc.case_code} has been settled directly with ${wc.vendor_name}. The signed Paid Vendor Receipt is now archived.`,
+          body_ur: `الحمدللہ! کیس ${wc.case_code} کی رقم (${wc.raised_amount_pkr.toLocaleString('en-PK')} روپے) براہِ راست ${wc.vendor_name} کو ادا کر دی گئی ہے اور رسید محفوظ کر لی گئی ہے۔`,
+          vendor_name: wc.vendor_name,
+          district: wc.district,
+          collected_pkr: wc.raised_amount_pkr,
+          target_pkr: wc.target_amount_pkr,
+        },
+        wc.beneficiary_account_email ? [wc.beneficiary_account_email] : []
+      );
     }
   },
 
@@ -1034,6 +1221,32 @@ export const dataClient = {
         })
         .eq('id', profileId);
       if (error) throw error;
+      if (accredited) {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', profileId)
+          .maybeSingle();
+        const vp = prof as Profile | null;
+        if (vp?.email) {
+          await emitNotification(
+            {
+              event_type: 'field_verified',
+              audience: 'both',
+              target_code: vp.id,
+              case_id: null,
+              campaign_id: null,
+              title_en: `Approved! Your Amanat Accredited Field Verifier ID Card Is Active`,
+              title_ur: `مبارکباد! آپ کا امانت فیلڈ ویریفائر ڈیجیٹل کارڈ فعال ہو گیا ہے`,
+              body_en: `Assalam-o-Alaikum ${vp.full_name}, the Amanat Verification Board has approved your Field Verifier accreditation for ${vp.tehsil}, ${vp.district}. Sign in to Amanat → Field Verifier tab to access your live 60-second anti-scam Dynamic QR ID Card and assigned household visits.`,
+              body_ur: `السلام علیکم ${vp.full_name}، امانت ایڈمن بورڈ نے آپ کی فیلڈ ویریفائر منظوری مکمل کر لی ہے۔ اب آپ امانت ایپ کے فیلڈ ویریفائر پورٹل میں اپنا 60 سیکنڈ والا لائیو کیو آر کارڈ اور تفویض شدہ کیسز دیکھ سکتے ہیں۔`,
+              vendor_name: 'Amanat Verification Board',
+              district: vp.district,
+            },
+            [vp.email]
+          );
+        }
+      }
       return;
     }
     await localDb.profiles.update(profileId, {
@@ -1232,7 +1445,8 @@ export const dataClient = {
           .eq('id', don.campaign_id)
           .single();
         if (camp) {
-          const newCollected = camp.collected_amount_pkr + don.amount_pkr;
+          const prevCollected = camp.collected_amount_pkr;
+          const newCollected = prevCollected + don.amount_pkr;
           const newPledged = Math.max(0, camp.pledged_amount_pkr - don.amount_pkr);
           const newStatus =
             newCollected >= camp.target_amount_pkr ? 'fully_funded' : camp.status;
@@ -1245,11 +1459,68 @@ export const dataClient = {
               status: newStatus,
             })
             .eq('id', camp.id);
+
+          // 1. Direct Confirmation Email to the Donor
+          if (don.donor_email) {
+            await emitNotification(
+              {
+                event_type: 'donation_pledged',
+                audience: 'donor',
+                target_code: camp.campaign_code,
+                case_id: null,
+                campaign_id: camp.id,
+                title_en: `Contribution Confirmed — PKR ${don.amount_pkr.toLocaleString('en-PK')} (${camp.campaign_code})`,
+                title_ur: `آپ کا عطیہ تصدیق ہو گیا — ${don.amount_pkr.toLocaleString('en-PK')} روپے`,
+                body_en: `JazakAllah Khair! Your contribution of PKR ${don.amount_pkr.toLocaleString('en-PK')} (Ref: ${don.transaction_ref}, QR Hash: ${don.receipt_qr_hash}) for "${camp.title_en}" has been verified and confirmed in Amanat's Direct Vendor Escrow ledger.`,
+                body_ur: `جزاک اللہ خیر! مہم "${camp.title_ur}" کے لیے آپ کا ${don.amount_pkr.toLocaleString('en-PK')} روپے کا عطیہ (ریفرنس: ${don.transaction_ref}) امانت ایسکرو لیجر میں تصدیق کر لیا گیا ہے۔`,
+                vendor_name: camp.vendor_name,
+                district: camp.district,
+                collected_pkr: newCollected,
+                target_pkr: camp.target_amount_pkr,
+              },
+              [don.donor_email]
+            );
+          }
+
+          // 2. Broadcast 25% / 50% / 75% / 100% Major Milestone to ALL Donors
+          const crossed = detectCrossedMajorMilestone(
+            prevCollected,
+            newCollected,
+            camp.target_amount_pkr
+          );
+          if (crossed !== null) {
+            const isFull = crossed === 100;
+            await emitNotification({
+              event_type: isFull ? 'fully_funded_locked' : 'funding_milestone',
+              audience: 'both',
+              target_code: camp.campaign_code,
+              case_id: null,
+              campaign_id: camp.id,
+              milestone_pct: crossed,
+              title_en: isFull
+                ? `100% Fully Funded! ${camp.title_en}`
+                : `${crossed}% Milestone Crossed — ${camp.title_en}`,
+              title_ur: isFull
+                ? `100% ہدف مکمل! ${camp.title_ur}`
+                : `${crossed}% اہم ہدف مکمل — ${camp.title_ur}`,
+              body_en: isFull
+                ? `Alhamdulillah! Verified escrow reached 100% (PKR ${newCollected.toLocaleString('en-PK')}). Direct vendor payout to ${camp.vendor_name} is now being initiated.`
+                : `Great news! Confirmed escrow just crossed ${crossed}% (PKR ${newCollected.toLocaleString('en-PK')} of PKR ${camp.target_amount_pkr.toLocaleString('en-PK')}) for ${camp.vendor_name}.`,
+              body_ur: isFull
+                ? `الحمدللہ! مہم کا 100 فیصد ہدف (${newCollected.toLocaleString('en-PK')} روپے) مکمل ہو گیا۔ اب ${camp.vendor_name} کو براہِ راست ادائیگی کی جا رہی ہے۔`
+                : `خوشخبری! مہم نے ${crossed} فیصد ہدف (${newCollected.toLocaleString('en-PK')} روپے از ${camp.target_amount_pkr.toLocaleString('en-PK')} روپے) عبور کر لیا ہے۔`,
+              vendor_name: camp.vendor_name,
+              district: camp.district,
+              collected_pkr: newCollected,
+              target_pkr: camp.target_amount_pkr,
+            });
+          }
         }
       } else if (don.case_id) {
         const { data: c } = await supabase.from('cases').select('*').eq('id', don.case_id).single();
         if (c) {
-          const newRaised = c.raised_amount_pkr + don.amount_pkr;
+          const prevRaised = c.raised_amount_pkr;
+          const newRaised = prevRaised + don.amount_pkr;
           const newPledged = Math.max(0, c.pledged_amount_pkr - don.amount_pkr);
           const newStatus = newRaised >= c.target_amount_pkr ? 'funded' : c.status;
           await supabase
@@ -1260,6 +1531,58 @@ export const dataClient = {
               status: newStatus,
             })
             .eq('id', c.id);
+
+          // 1. Direct Confirmation Email to the Donor
+          if (don.donor_email) {
+            await emitNotification(
+              {
+                event_type: 'donation_pledged',
+                audience: 'donor',
+                target_code: c.case_code,
+                case_id: c.id,
+                campaign_id: null,
+                title_en: `Contribution Confirmed — PKR ${don.amount_pkr.toLocaleString('en-PK')} (${c.case_code})`,
+                title_ur: `آپ کا عطیہ تصدیق ہو گیا — ${don.amount_pkr.toLocaleString('en-PK')} روپے`,
+                body_en: `JazakAllah Khair! Your contribution of PKR ${don.amount_pkr.toLocaleString('en-PK')} (Ref: ${don.transaction_ref}, QR Hash: ${don.receipt_qr_hash}) for Case ${c.case_code} (${c.district}) has been verified and confirmed.`,
+                body_ur: `جزاک اللہ خیر! کیس ${c.case_code} کے لیے آپ کا ${don.amount_pkr.toLocaleString('en-PK')} روپے کا عطیہ (ریفرنس: ${don.transaction_ref}) تصدیق کر لیا گیا ہے۔`,
+                vendor_name: c.vendor_name,
+                district: c.district,
+                collected_pkr: newRaised,
+                target_pkr: c.target_amount_pkr,
+              },
+              [don.donor_email]
+            );
+          }
+
+          // 2. Broadcast 25% / 50% / 75% / 100% Major Milestone to ALL Donors & Beneficiary
+          const crossed = detectCrossedMajorMilestone(prevRaised, newRaised, c.target_amount_pkr);
+          if (crossed !== null) {
+            const isFull = crossed === 100;
+            await emitNotification({
+              event_type: isFull ? 'fully_funded_locked' : 'funding_milestone',
+              audience: 'both',
+              target_code: c.case_code,
+              case_id: c.id,
+              campaign_id: null,
+              milestone_pct: crossed,
+              title_en: isFull
+                ? `100% Funded! Case ${c.case_code} Ready for Vendor Payout`
+                : `${crossed}% Milestone Crossed — Case ${c.case_code}`,
+              title_ur: isFull
+                ? `100% فنڈنگ مکمل! کیس ${c.case_code}`
+                : `${crossed}% اہم ہدف مکمل — کیس ${c.case_code}`,
+              body_en: isFull
+                ? `Alhamdulillah! Case ${c.case_code} (${c.district}) reached 100% (PKR ${newRaised.toLocaleString('en-PK')}). Direct settlement with ${c.vendor_name} is underway.`
+                : `Funding for Case ${c.case_code} (${c.district}) crossed ${crossed}% — PKR ${newRaised.toLocaleString('en-PK')} of PKR ${c.target_amount_pkr.toLocaleString('en-PK')} confirmed.`,
+              body_ur: isFull
+                ? `الحمدللہ! کیس ${c.case_code} کا 100 فیصد ہدف مکمل ہو گیا ہے۔ اب ${c.vendor_name} کو براہِ راست ادائیگی کی جا رہی ہے۔`
+                : `کیس ${c.case_code} کی تصدیق شدہ فنڈنگ ${crossed} فیصد (${newRaised.toLocaleString('en-PK')} روپے) سے تجاوز کر گئی ہے۔`,
+              vendor_name: c.vendor_name,
+              district: c.district,
+              collected_pkr: newRaised,
+              target_pkr: c.target_amount_pkr,
+            });
+          }
         }
       }
       return;
