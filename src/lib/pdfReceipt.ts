@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import type { Donation, DonationTarget } from '@/types/amanat';
+import { getPublicAppUrl } from '@/lib/utils';
 
 export function downloadAmanatCertificatePDF(
   donation: Donation,
@@ -92,6 +93,12 @@ export function downloadAmanatCertificatePDF(
     110
   );
   doc.text(pledgeLines, 20, 219);
+
+  const verifyUrl = `${getPublicAppUrl()}/?verify=${encodeURIComponent(donation.receipt_qr_hash)}`;
+
+  doc.setFontSize(8.2);
+  doc.setTextColor(6, 78, 59);
+  doc.text(`Verify live online: ${verifyUrl}`, 105, 270, { align: 'center' });
 
   doc.setFontSize(8.5);
   doc.setTextColor(100, 116, 139);

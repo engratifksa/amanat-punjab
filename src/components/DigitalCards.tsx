@@ -7,7 +7,7 @@ import {
   generateDynamicVerifierToken,
   getSecondsRemainingInWindow,
 } from '@/lib/dynamicQr';
-import { formatPKR } from '@/lib/utils';
+import { formatPKR, getPublicAppUrl } from '@/lib/utils';
 import { AmanatLogo } from './AmanatLogo';
 import { Badge, Button } from './ui/primitives';
 
@@ -181,7 +181,7 @@ export function BeneficiaryDigitalCard({
     <div className="rounded-2xl bg-gradient-to-r from-emerald-950 to-emerald-900 p-4 text-white border border-gold-400/30 flex items-center gap-3.5">
       <div className="rounded-xl bg-white p-2 shrink-0">
         <QRCodeCanvas
-          value={`AMANAT-CASE|${welfareCase.case_code}|${welfareCase.district}|${welfareCase.status}`}
+          value={`${getPublicAppUrl()}/?case=${encodeURIComponent(welfareCase.case_code)}`}
           size={68}
           fgColor="#064E3B"
           level="M"

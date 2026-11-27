@@ -1,3 +1,5 @@
+import { useRef } from 'react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { Download, CheckCircle2, Clock, ShieldCheck, LogOut, Heart } from 'lucide-react';
 import type {
   AuthUserSession,
@@ -5,7 +7,7 @@ import type {
   Donation,
   WelfareCase,
 } from '@/types/amanat';
-import { formatPKR } from '@/lib/utils';
+import { formatPKR, getPublicAppUrl } from '@/lib/utils';
 import { downloadAmanatCertificatePDF } from '@/lib/pdfReceipt';
 import { Badge, Button, Card } from './ui/primitives';
 import { DonorDigitalCard } from './DigitalCards';
@@ -27,6 +29,8 @@ export function DonorDashboard({
   onSignOut,
   onExploreDrives,
 }: DonorDashboardProps) {
+  const qrRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
   const myDonations = donations.filter(
     (d) =>
       (d.donor_email && d.donor_email.toLowerCase() === user.email.toLowerCase()) ||
@@ -161,10 +165,29 @@ export function DonorDashboard({
                     </p>
                   </div>
 
+                  <div
+                    ref={(el) => {
+                      qrRefs.current[d.id] = el;
+                    }}
+                    className="hidden"
+                    aria-hidden="true"
+                  >
+                    <QRCodeCanvas
+                      value={`${getPublicAppUrl()}/?verify=${d.receipt_qr_hash}&ref=${encodeURIComponent(d.transaction_ref)}&pkr=${d.amount_pkr}`}
+                      size={180}
+                      fgColor="#064E3B"
+                      level="M"
+                    />
+                  </div>
+
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => downloadAmanatCertificatePDF(d, target)}
+                    onClick={() => {
+                      const canvas =
+                        qrRefs.current[d.id]?.querySelector('canvas') ?? null;
+                      downloadAmanatCertificatePDF(d, target, canvas);
+                    }}
                   >
                     <Download className="h-3.5 w-3.5" />
                     PDF Certificate
