@@ -12,6 +12,8 @@ import {
   Clock,
   ShieldCheck,
   Building2,
+  Share2,
+  Sparkles,
 } from 'lucide-react';
 import type {
   Donation,
@@ -32,6 +34,7 @@ interface PaymentModalProps {
   escrowAccounts?: EscrowAccounts;
   defaultDonorEmail?: string;
   onClose: () => void;
+  onShareTarget?: () => void;
   onSubmitPledge: (payload: {
     case_id: string | null;
     campaign_id: string | null;
@@ -60,6 +63,7 @@ export function PaymentModal({
   escrowAccounts,
   defaultDonorEmail = '',
   onClose,
+  onShareTarget,
   onSubmitPledge,
   existingDonation = null,
 }: PaymentModalProps) {
@@ -457,6 +461,32 @@ export function PaymentModal({
                   </div>
                 </div>
               </div>
+
+              {/* Post-Donation Multiply Your Reward (Sadaqah Jariyah) Share Prompt */}
+              {onShareTarget && (
+                <div className="rounded-2xl border border-gold-300 bg-gradient-to-r from-gold-50 via-amber-50/70 to-emerald-50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <p className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5">
+                      <Sparkles className="h-4 w-4 text-gold-600 shrink-0" />
+                      JazakAllah Khair! Multiply Your Reward (Sadaqah Jariyah)
+                    </p>
+                    <p className="text-[11px] text-slate-700 leading-relaxed">
+                      Share this verified drive on WhatsApp or Social Media with a ready-to-post
+                      English &amp; Urdu message and poster so friends and family can also help.
+                    </p>
+                  </div>
+                  <Button
+                    variant="gold"
+                    size="md"
+                    type="button"
+                    onClick={onShareTarget}
+                    className="shrink-0"
+                  >
+                    <Share2 className="h-4 w-4" />
+                    <span>Share Drive</span>
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -31,6 +31,7 @@ import { UserAuthModal, PENDING_OAUTH_KEY } from '@/components/UserAuthModal';
 import { DonorDashboard } from '@/components/DonorDashboard';
 import { VerifierQrScannerModal } from '@/components/VerifierQrScannerModal';
 import { ReceiptVerifyModal } from '@/components/ReceiptVerifyModal';
+import { SocialShareModal, type ShareableItem } from '@/components/SocialShareModal';
 import { SocialBar } from '@/components/SocialBar';
 import { MobileBottomNav } from '@/components/MobileBottomNav';
 
@@ -69,6 +70,8 @@ export default function App() {
   const [language, setLanguage] = useState<'en' | 'ur'>('en');
   const [caseFilter, setCaseFilter] = useState<CaseFilterKey>('all');
   const [donationTarget, setDonationTarget] = useState<DonationTarget | null>(null);
+  const [shareItem, setShareItem] = useState<ShareableItem | null>(null);
+  const [highlightedCode, setHighlightedCode] = useState<string | null>(null);
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [campaigns, setCampaigns] = useState<CrowdfundingCampaign[]>([]);
@@ -98,6 +101,30 @@ export default function App() {
   useEffect(() => {
     refreshData();
   }, [refreshData]);
+
+  // Deep-link support: ?campaign=AMN-CF-04 or ?case=AMN-LHR-001
+  useEffect(() => {
+    if (loading || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const campCode = params.get('campaign');
+    const caseCode = params.get('case');
+    const targetCode = campCode || caseCode;
+    if (!targetCode) return;
+
+    setActiveRole('donor');
+    setHighlightedCode(targetCode);
+    const elId = campCode ? `campaign-${campCode}` : `case-${caseCode}`;
+    const timer = window.setTimeout(() => {
+      document.getElementById(elId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 250);
+    const clearTimer = window.setTimeout(() => {
+      setHighlightedCode(null);
+    }, 6500);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [loading]);
 
   // Listen for real Supabase Google OAuth callbacks & session restoration
   useEffect(() => {
@@ -345,7 +372,9 @@ export default function App() {
             <CampaignsSection
               campaigns={campaigns}
               language={language}
+              highlightedCode={highlightedCode}
               onDonate={(target) => setDonationTarget(target)}
+              onShare={(item) => setShareItem(item)}
             />
 
             <CasesSection
@@ -353,8 +382,10 @@ export default function App() {
               profiles={profiles}
               language={language}
               activeFilter={caseFilter}
+              highlightedCode={highlightedCode}
               onChangeFilter={setCaseFilter}
               onDonate={(target) => setDonationTarget(target)}
+              onShare={(item) => setShareItem(item)}
             />
 
             <EscrowPipeline />
@@ -541,12 +572,75 @@ export default function App() {
         escrowAccounts={settings.escrow_accounts}
         defaultDonorEmail={currentUser?.email ?? ''}
         onClose={() => setDonationTarget(null)}
+        onShareTarget={
+          donationTarget
+            ? () => {
+                if (donationTarget.type === 'campaign') {
+                  const found = campaigns.find((c) => c.id === donationTarget.id);
+                  if (found) {
+                    setShareItem({
+                      type: 'campaign',
+                      code: found.campaign_code,
+                      title_en: found.title_en,
+                      title_ur: found.title_ur,
+                      summary_en: found.summary_en,
+                      summary_ur: found.summary_ur,
+                      district: found.district,
+                      category: found.category,
+                      funding_type: found.funding_type,
+                      vendor_name: found.vendor_name,
+                      target_amount_pkr: found.target_amount_pkr,
+                      collected_amount_pkr: found.collected_amount_pkr,
+                      donor_count: found.donor_count,
+                    });
+                    return;
+                  }
+                } else {
+                  const found = cases.find((c) => c.id === donationTarget.id);
+                  if (found) {
+                    setShareItem({
+                      type: 'case',
+                      code: found.case_code,
+                      title_en: `${found.case_code} — ${found.district}`,
+                      title_ur: `${found.district} میں مستحق خاندان کی امداد (${found.case_code})`,
+                      summary_en: found.anonymized_story_en,
+                      summary_ur: found.anonymized_story_ur,
+                      district: found.district,
+                      tehsil: found.tehsil,
+                      category: found.category,
+                      funding_type: found.funding_type,
+                      vendor_name: found.vendor_name,
+                      target_amount_pkr: found.target_amount_pkr,
+                      collected_amount_pkr: found.raised_amount_pkr,
+                    });
+                    return;
+                  }
+                }
+                setShareItem({
+                  type: donationTarget.type,
+                  code: donationTarget.code,
+                  title_en: donationTarget.title_en,
+                  title_ur: donationTarget.title_ur,
+                  summary_en: `Verified Direct Vendor Escrow initiative in ${donationTarget.district}, Punjab.`,
+                  summary_ur: `${donationTarget.district}، پنجاب میں تصدیق شدہ براہِ راست وینڈر ایسکرو مہم۔`,
+                  district: donationTarget.district,
+                  category: 'welfare',
+                  funding_type: donationTarget.funding_type,
+                  vendor_name: donationTarget.vendor_name,
+                  target_amount_pkr: donationTarget.target_amount_pkr,
+                  collected_amount_pkr: donationTarget.collected_amount_pkr,
+                });
+              }
+            : undefined
+        }
         onSubmitPledge={async (payload) => {
           const created = await dataClient.submitDonationPledge(payload);
           await refreshData();
           return created;
         }}
       />
+
+      <SocialShareModal item={shareItem} onClose={() => setShareItem(null)} />
     </div>
   );
 }

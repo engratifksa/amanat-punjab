@@ -1,10 +1,11 @@
 import { useTranslation } from 'react-i18next';
 import Tilt from 'react-parallax-tilt';
-import { Building2, CheckCircle2, MapPin, ShieldCheck, BadgeCheck } from 'lucide-react';
+import { Building2, CheckCircle2, MapPin, Share2, ShieldCheck, BadgeCheck } from 'lucide-react';
 import type { DonationTarget, Profile, WelfareCase } from '@/types/amanat';
 import { Badge, Button } from './ui/primitives';
 import { DualProgressBar } from './DualProgressBar';
 import { cn } from '@/lib/utils';
+import type { ShareableItem } from './SocialShareModal';
 
 export type CaseFilterKey =
   | 'all'
@@ -30,8 +31,10 @@ interface CasesSectionProps {
   profiles: Profile[];
   language: 'en' | 'ur';
   activeFilter: CaseFilterKey;
+  highlightedCode?: string | null;
   onChangeFilter: (f: CaseFilterKey) => void;
   onDonate: (target: DonationTarget) => void;
+  onShare: (item: ShareableItem) => void;
 }
 
 export function CasesSection({
@@ -39,8 +42,10 @@ export function CasesSection({
   profiles,
   language,
   activeFilter,
+  highlightedCode,
   onChangeFilter,
   onDonate,
+  onShare,
 }: CasesSectionProps) {
   const { t } = useTranslation();
 
@@ -101,6 +106,26 @@ export function CasesSection({
             c.status === 'funded' ||
             c.raised_amount_pkr >= c.target_amount_pkr;
 
+          const isHighlighted =
+            highlightedCode?.toLowerCase() === c.case_code.toLowerCase();
+
+          const buildShareItem = (): ShareableItem => ({
+            type: 'case',
+            code: c.case_code,
+            title_en: `${t(`categories.${c.category}`)} Support — ${c.district}`,
+            title_ur: `${c.district} میں مستحق خاندان کی امداد (${c.case_code})`,
+            summary_en: c.anonymized_story_en,
+            summary_ur: c.anonymized_story_ur,
+            district: c.district,
+            tehsil: c.tehsil,
+            category: c.category,
+            funding_type: c.funding_type,
+            vendor_name: c.vendor_name,
+            target_amount_pkr: c.target_amount_pkr,
+            collected_amount_pkr: c.raised_amount_pkr,
+            is_completed: isClosed,
+          });
+
           return (
             <Tilt
               key={c.id}
@@ -110,7 +135,13 @@ export function CasesSection({
               glareMaxOpacity={0.07}
               className="h-full"
             >
-              <article className="glass-card flex h-full flex-col justify-between rounded-3xl p-5 hover:shadow-glass-lg transition-shadow">
+              <article
+                id={`case-${c.case_code}`}
+                className={cn(
+                  'glass-card flex h-full flex-col justify-between rounded-3xl p-5 hover:shadow-glass-lg transition-all scroll-mt-24',
+                  isHighlighted && 'ring-4 ring-gold-400 shadow-glass-lg border-gold-500'
+                )}
+              >
                 <div className="space-y-3.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-mono text-xs font-extrabold text-emerald-900 bg-emerald-100/80 px-2.5 py-1 rounded-lg">
@@ -168,36 +199,50 @@ export function CasesSection({
                     </div>
                   </div>
 
-                  {isClosed ? (
-                    <Button variant="outline" className="w-full" disabled>
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                      {t('cases.paidToVendor')}
-                    </Button>
-                  ) : (
+                  <div className="flex items-center gap-2">
+                    {isClosed ? (
+                      <Button variant="outline" className="flex-1" disabled>
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        {t('cases.paidToVendor')}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="gold"
+                        className="flex-1"
+                        onClick={() =>
+                          onDonate({
+                            type: 'case',
+                            id: c.id,
+                            code: c.case_code,
+                            title_en: `${c.case_code} — ${c.district} (${c.vendor_type})`,
+                            title_ur: `${c.case_code} — ${c.district}`,
+                            district: c.district,
+                            vendor_name: c.vendor_name,
+                            vendor_invoice_url: c.vendor_invoice_url,
+                            funding_type: c.funding_type,
+                            target_amount_pkr: c.target_amount_pkr,
+                            collected_amount_pkr: c.raised_amount_pkr,
+                            pledged_amount_pkr: c.pledged_amount_pkr,
+                            status: c.status,
+                          })
+                        }
+                      >
+                        {t('cases.donateTrack')}
+                      </Button>
+                    )}
+
                     <Button
-                      variant="gold"
-                      className="w-full"
-                      onClick={() =>
-                        onDonate({
-                          type: 'case',
-                          id: c.id,
-                          code: c.case_code,
-                          title_en: `${c.case_code} — ${c.district} (${c.vendor_type})`,
-                          title_ur: `${c.case_code} — ${c.district}`,
-                          district: c.district,
-                          vendor_name: c.vendor_name,
-                          vendor_invoice_url: c.vendor_invoice_url,
-                          funding_type: c.funding_type,
-                          target_amount_pkr: c.target_amount_pkr,
-                          collected_amount_pkr: c.raised_amount_pkr,
-                          pledged_amount_pkr: c.pledged_amount_pkr,
-                          status: c.status,
-                        })
-                      }
+                      variant="outline"
+                      type="button"
+                      onClick={() => onShare(buildShareItem())}
+                      aria-label={`Share ${c.case_code} on social media`}
+                      title="Share Verified Case (EN + Urdu Poster)"
+                      className="shrink-0 border-emerald-900/20 text-emerald-900 hover:bg-emerald-50 px-3.5"
                     >
-                      {t('cases.donateTrack')}
+                      <Share2 className="h-4 w-4 text-emerald-700" />
+                      <span>{language === 'ur' ? 'شیئر' : 'Share'}</span>
                     </Button>
-                  )}
+                  </div>
                 </div>
               </article>
             </Tilt>

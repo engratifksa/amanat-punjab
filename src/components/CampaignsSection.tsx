@@ -5,6 +5,7 @@ import {
   Clock,
   Lock,
   MapPin,
+  Share2,
   Sparkles,
   Users,
   CheckCircle2,
@@ -12,18 +13,23 @@ import {
 import type { CrowdfundingCampaign, DonationTarget } from '@/types/amanat';
 import { Badge, Button } from './ui/primitives';
 import { DualProgressBar } from './DualProgressBar';
-import { daysUntil } from '@/lib/utils';
+import { cn, daysUntil } from '@/lib/utils';
+import type { ShareableItem } from './SocialShareModal';
 
 interface CampaignsSectionProps {
   campaigns: CrowdfundingCampaign[];
   language: 'en' | 'ur';
+  highlightedCode?: string | null;
   onDonate: (target: DonationTarget) => void;
+  onShare: (item: ShareableItem) => void;
 }
 
 export function CampaignsSection({
   campaigns,
   language,
+  highlightedCode,
   onDonate,
+  onShare,
 }: CampaignsSectionProps) {
   const { t } = useTranslation();
   const visibleCampaigns = campaigns.filter(
@@ -58,6 +64,26 @@ export function CampaignsSection({
             camp.collected_amount_pkr >= camp.target_amount_pkr;
           const remainingDays = daysUntil(camp.deadline_date);
 
+          const isHighlighted =
+            highlightedCode?.toLowerCase() === camp.campaign_code.toLowerCase();
+
+          const buildShareItem = (): ShareableItem => ({
+            type: 'campaign',
+            code: camp.campaign_code,
+            title_en: camp.title_en,
+            title_ur: camp.title_ur,
+            summary_en: camp.summary_en,
+            summary_ur: camp.summary_ur,
+            district: camp.district,
+            category: camp.category,
+            funding_type: camp.funding_type,
+            vendor_name: camp.vendor_name,
+            target_amount_pkr: camp.target_amount_pkr,
+            collected_amount_pkr: camp.collected_amount_pkr,
+            donor_count: camp.donor_count,
+            is_completed: isLocked,
+          });
+
           return (
             <Tilt
               key={camp.id}
@@ -67,7 +93,13 @@ export function CampaignsSection({
               glareMaxOpacity={0.08}
               className="h-full"
             >
-              <article className="glass-card flex h-full flex-col justify-between rounded-3xl p-6 transition-shadow hover:shadow-glass-lg border-emerald-900/15">
+              <article
+                id={`campaign-${camp.campaign_code}`}
+                className={cn(
+                  'glass-card flex h-full flex-col justify-between rounded-3xl p-6 transition-all hover:shadow-glass-lg border-emerald-900/15 scroll-mt-24',
+                  isHighlighted && 'ring-4 ring-gold-400 shadow-glass-lg border-gold-500'
+                )}
+              >
                 <div className="space-y-4">
                   {/* Top Badges */}
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -136,41 +168,55 @@ export function CampaignsSection({
                     </div>
                   </div>
 
-                  {camp.status === 'disbursed_to_vendor' ? (
-                    <Button variant="outline" className="w-full" disabled>
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                      {t('campaigns.disbursed')}
-                    </Button>
-                  ) : isLocked ? (
-                    <Button variant="outline" className="w-full" disabled>
-                      <Lock className="h-4 w-4 text-emerald-700" />
-                      {t('campaigns.fullyFunded')}
-                    </Button>
-                  ) : (
+                  <div className="flex items-center gap-2">
+                    {camp.status === 'disbursed_to_vendor' ? (
+                      <Button variant="outline" className="flex-1" disabled>
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        {t('campaigns.disbursed')}
+                      </Button>
+                    ) : isLocked ? (
+                      <Button variant="outline" className="flex-1" disabled>
+                        <Lock className="h-4 w-4 text-emerald-700" />
+                        {t('campaigns.fullyFunded')}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="primary"
+                        className="flex-1"
+                        onClick={() =>
+                          onDonate({
+                            type: 'campaign',
+                            id: camp.id,
+                            code: camp.campaign_code,
+                            title_en: camp.title_en,
+                            title_ur: camp.title_ur,
+                            district: camp.district,
+                            vendor_name: camp.vendor_name,
+                            vendor_invoice_url: camp.vendor_invoice_url,
+                            funding_type: camp.funding_type,
+                            target_amount_pkr: camp.target_amount_pkr,
+                            collected_amount_pkr: camp.collected_amount_pkr,
+                            pledged_amount_pkr: camp.pledged_amount_pkr,
+                            status: camp.status,
+                          })
+                        }
+                      >
+                        {t('campaigns.contribute')}
+                      </Button>
+                    )}
+
                     <Button
-                      variant="primary"
-                      className="w-full"
-                      onClick={() =>
-                        onDonate({
-                          type: 'campaign',
-                          id: camp.id,
-                          code: camp.campaign_code,
-                          title_en: camp.title_en,
-                          title_ur: camp.title_ur,
-                          district: camp.district,
-                          vendor_name: camp.vendor_name,
-                          vendor_invoice_url: camp.vendor_invoice_url,
-                          funding_type: camp.funding_type,
-                          target_amount_pkr: camp.target_amount_pkr,
-                          collected_amount_pkr: camp.collected_amount_pkr,
-                          pledged_amount_pkr: camp.pledged_amount_pkr,
-                          status: camp.status,
-                        })
-                      }
+                      variant="outline"
+                      type="button"
+                      onClick={() => onShare(buildShareItem())}
+                      aria-label={`Share ${camp.campaign_code} on social media`}
+                      title="Share Campaign (EN + Urdu Poster)"
+                      className="shrink-0 border-emerald-900/20 text-emerald-900 hover:bg-emerald-50 px-3.5"
                     >
-                      {t('campaigns.contribute')}
+                      <Share2 className="h-4 w-4 text-emerald-700" />
+                      <span>{language === 'ur' ? 'شیئر' : 'Share'}</span>
                     </Button>
-                  )}
+                  </div>
                 </div>
               </article>
             </Tilt>
