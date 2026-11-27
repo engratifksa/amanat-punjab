@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Download, Globe, ShieldCheck, CheckCircle2, Lock, Unlock, UserCircle2, LogOut } from 'lucide-react';
+import { Download, Globe, ShieldCheck, CheckCircle2, Lock, Unlock, UserCircle2, LogOut, QrCode } from 'lucide-react';
 import type { AuthUserSession, NotificationRecord, UserRole } from '@/types/amanat';
 import { Button } from './ui/primitives';
 import { AmanatLogo } from './AmanatLogo';
@@ -23,6 +23,7 @@ interface HeaderProps {
   currentUser: AuthUserSession | null;
   onOpenUserAuth: (role?: 'donor' | 'beneficiary' | 'verifier') => void;
   onSignOutUser: () => void;
+  onOpenVerifierScanner: () => void;
 }
 
 const PUBLIC_ROLES: UserRole[] = ['donor', 'beneficiary', 'verifier'];
@@ -44,6 +45,7 @@ export function Header({
   currentUser,
   onOpenUserAuth,
   onSignOutUser,
+  onOpenVerifierScanner,
 }: HeaderProps) {
   const { t } = useTranslation();
 
@@ -145,6 +147,16 @@ export function Header({
               <span className="hidden sm:inline">Sign In</span>
             </Button>
           )}
+
+          <button
+            type="button"
+            onClick={onOpenVerifierScanner}
+            aria-label="Verify Field Verifier QR Scanner"
+            title="Anti-Scam: Scan Field Verifier Live QR"
+            className="inline-flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl border border-gold-400/40 bg-amber-50/90 text-emerald-950 hover:bg-gold-100 transition"
+          >
+            <QrCode className="h-4 w-4 text-emerald-900" />
+          </button>
 
           <NotificationBell
             notifications={notifications}

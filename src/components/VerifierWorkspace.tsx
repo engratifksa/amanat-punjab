@@ -22,18 +22,21 @@ import type {
   WelfareCase,
 } from '@/types/amanat';
 import { formatPKR } from '@/lib/utils';
-import { Badge, Button, Card, Input, Textarea } from './ui/primitives';
+import { Badge, Button, Card, Input, Select, Textarea } from './ui/primitives';
 import {
   LocationPinPicker,
   haversineDistanceKm,
   type GeoCoordinates,
 } from './LocationPinPicker';
 import { SmartImageCapture } from './SmartImageCapture';
+import { VerifierDynamicIdCard } from './DigitalCards';
+import { PUNJAB_DISTRICTS } from '@/lib/seedData';
 
 interface VerifierWorkspaceProps {
   currentUser: AuthUserSession | null;
   profiles: Profile[];
   onOpenAuth: () => void;
+  onApplyAsVerifier: (district: string, tehsil: string) => Promise<void>;
   cases: WelfareCase[];
   verifications: FieldVerification[];
   onSubmitVerification: (payload: {
@@ -56,6 +59,7 @@ export function VerifierWorkspace({
   currentUser,
   profiles,
   onOpenAuth,
+  onApplyAsVerifier,
   cases,
   verifications,
   onSubmitVerification,
@@ -72,21 +76,30 @@ export function VerifierWorkspace({
   const [evidencePhoto, setEvidencePhoto] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [applyDistrict, setApplyDistrict] = useState(currentUser?.district || 'Lahore');
+  const [applyTehsil, setApplyTehsil] = useState(
+    currentUser?.tehsil || PUNJAB_DISTRICTS['Lahore'][0]
+  );
+  const [applying, setApplying] = useState(false);
 
-  const isVerifierSignedIn = currentUser?.role === 'verifier';
-  const verifierProfile = isVerifierSignedIn
+  // Match ANY signed-in user against persistent Supabase profiles (never asks to sign in again!)
+  const verifierProfile = currentUser
     ? profiles.find(
         (p) =>
-          p.role === 'verifier' &&
-          (p.id === currentUser.profile_id ||
-            p.full_name.toLowerCase() === currentUser.full_name.toLowerCase())
-      )
+          (currentUser.profile_id && p.id === currentUser.profile_id) ||
+          (p.auth_user_id && p.auth_user_id === currentUser.id) ||
+          (p.email && p.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+          p.full_name.toLowerCase() === currentUser.full_name.toLowerCase()
+      ) ?? null
     : null;
 
   const isAccredited = Boolean(verifierProfile?.is_accredited_verifier);
+  const hasApplied = Boolean(
+    verifierProfile && (verifierProfile.verifier_applied || verifierProfile.role === 'verifier')
+  );
 
-  // Gate 1: Require Google Sign-In
-  if (!isVerifierSignedIn) {
+  // Gate 1: Only ask to Sign In if completely logged out
+  if (!currentUser) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
         <Card className="p-8 text-center space-y-5 border-emerald-900/15">
@@ -98,9 +111,9 @@ export function VerifierWorkspace({
             Field Verifier Portal (Accredited Volunteers Only)
           </h1>
           <p className="mx-auto max-w-lg text-sm text-slate-600 leading-relaxed">
-            Field Verifiers sign in with <strong>Google</strong> and must be accredited by the
+            Field Verifiers sign in once with <strong>Google</strong> and must be accredited by the
             Amanat Admin Board before accessing confidential household dossiers, GPS locations, or
-            submitting ground-visit reports.
+            their anti-scam Dynamic QR ID Card.
           </p>
           <div className="pt-2">
             <Button variant="primary" size="lg" onClick={onOpenAuth}>
@@ -113,7 +126,73 @@ export function VerifierWorkspace({
     );
   }
 
-  // Gate 2: Require Admin Board Approval
+  // Gate 2A: Already signed in, hasn't applied as Field Verifier yet -> 1-click apply (NO re-login!)
+  if (!isAccredited && !hasApplied) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6">
+        <Card className="p-8 space-y-5 border-emerald-900/15">
+          <div className="text-center space-y-2">
+            <Badge variant="emerald">Signed in as {currentUser.full_name} ({currentUser.email})</Badge>
+            <h1 className="text-2xl font-extrabold text-emerald-950">
+              Apply to Become an Accredited Field Verifier
+            </h1>
+            <p className="text-sm text-slate-600">
+              Select the Punjab District &amp; Tehsil where you can verify households on the ground.
+              Once Admin approves you, your live 60-second Dynamic QR ID Card unlocks automatically.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">District</label>
+              <Select
+                value={applyDistrict}
+                onChange={(e) => {
+                  const d = e.target.value;
+                  setApplyDistrict(d);
+                  setApplyTehsil(PUNJAB_DISTRICTS[d]?.[0] ?? d);
+                }}
+              >
+                {Object.keys(PUNJAB_DISTRICTS).map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">Tehsil</label>
+              <Select value={applyTehsil} onChange={(e) => setApplyTehsil(e.target.value)}>
+                {(PUNJAB_DISTRICTS[applyDistrict] ?? [applyDistrict]).map((th) => (
+                  <option key={th} value={th}>
+                    {th}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          <Button
+            variant="primary"
+            size="lg"
+            className="w-full"
+            disabled={applying}
+            onClick={async () => {
+              setApplying(true);
+              try {
+                await onApplyAsVerifier(applyDistrict, applyTehsil);
+              } finally {
+                setApplying(false);
+              }
+            }}
+          >
+            <ShieldCheck className="h-5 w-5" />
+            <span>{applying ? 'Submitting...' : 'Submit Volunteer Verifier Application'}</span>
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  // Gate 2B: Applied, awaiting Admin Board Accreditation
   if (!isAccredited) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
@@ -128,11 +207,11 @@ export function VerifierWorkspace({
           <p className="mx-auto max-w-lg text-sm text-slate-700 leading-relaxed">
             Your Field Verifier registration for{' '}
             <strong>
-              {currentUser.tehsil}, {currentUser.district}
+              {verifierProfile?.tehsil || currentUser.tehsil},{' '}
+              {verifierProfile?.district || currentUser.district}
             </strong>{' '}
-            has been submitted. To protect family privacy, confidential beneficiary details unlock
-            only after the Amanat Admin Board accredits your profile under{' '}
-            <em>Case &amp; Payment Audit → Field Verifier Accreditation</em>.
+            is saved in Supabase. Your confidential dossier access and live 60-second Dynamic QR ID
+            Card will unlock automatically the moment Admin clicks <em>Accredit Verifier</em>.
           </p>
         </Card>
       </div>
@@ -198,6 +277,9 @@ export function VerifierWorkspace({
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 space-y-6">
+      {/* Live Anti-Scam 60-Second Dynamic Field Verifier Digital ID Card */}
+      {verifierProfile && <VerifierDynamicIdCard verifier={verifierProfile} />}
+
       {/* Header Banner */}
       <div className="rounded-3xl bg-emerald-950 p-6 sm:p-8 text-white shadow-glass-lg flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>

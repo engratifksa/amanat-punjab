@@ -8,6 +8,7 @@ import type {
 import { formatPKR } from '@/lib/utils';
 import { downloadAmanatCertificatePDF } from '@/lib/pdfReceipt';
 import { Badge, Button, Card } from './ui/primitives';
+import { DonorDigitalCard } from './DigitalCards';
 
 interface DonorDashboardProps {
   user: AuthUserSession;
@@ -100,6 +101,12 @@ export function DonorDashboard({
             </Button>
           </div>
         </div>
+
+        <DonorDigitalCard
+          user={user}
+          totalGivenPkr={totalGiven}
+          donationCount={myDonations.length}
+        />
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="rounded-2xl bg-white p-4 border border-emerald-900/10">

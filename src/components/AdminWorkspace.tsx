@@ -19,8 +19,16 @@ import {
   Landmark,
   Share2,
   MapPin,
+  Download,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import { VolunteerPostModal } from './VolunteerPostModal';
+import {
+  exportAllCampaignsCsv,
+  exportFullAuditLedgerCsv,
+  exportSingleCampaignCsv,
+} from '@/lib/csvExport';
 import type {
   AppSettings,
   CampaignCategory,
@@ -66,6 +74,11 @@ interface AdminWorkspaceProps {
   onUploadCaseReceipt: (id: string, receiptUrl: string) => Promise<void>;
   onSaveSettings: (next: AppSettings) => Promise<void>;
   onSendTestNotification: () => Promise<void>;
+  onDeleteCampaign: (id: string) => Promise<void>;
+  onDeleteCase: (id: string) => Promise<void>;
+  onDeleteDonation: (id: string) => Promise<void>;
+  onDeleteProfile: (id: string) => Promise<void>;
+  onFlushDummyData: () => Promise<void>;
   onLogoutAdmin: () => void;
 }
 
@@ -86,6 +99,11 @@ export function AdminWorkspace({
   onUploadCaseReceipt,
   onSaveSettings,
   onSendTestNotification,
+  onDeleteCampaign,
+  onDeleteCase,
+  onDeleteDonation,
+  onDeleteProfile,
+  onFlushDummyData,
   onLogoutAdmin,
 }: AdminWorkspaceProps) {
   const { t } = useTranslation();
@@ -111,6 +129,8 @@ export function AdminWorkspace({
   const [savingSettings, setSavingSettings] = useState(false);
   const [testingTelegram, setTestingTelegram] = useState(false);
   const [volunteerPostCase, setVolunteerPostCase] = useState<WelfareCase | null>(null);
+  const [flushConfirmText, setFlushConfirmText] = useState('');
+  const [flushing, setFlushing] = useState(false);
 
   useEffect(() => {
     setDraftSettings(settings);
@@ -433,9 +453,29 @@ export function AdminWorkspace({
 
           {/* Live Simultaneous Campaigns Monitor */}
           <div className="lg:col-span-7 space-y-4">
-            <h2 className="text-base font-extrabold text-emerald-950">
-              All Crowdfunding Drives ({campaigns.length})
-            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-base font-extrabold text-emerald-950">
+                All Crowdfunding Drives ({campaigns.length})
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => exportAllCampaignsCsv(campaigns)}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Export All Campaigns CSV
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => exportFullAuditLedgerCsv(campaigns, cases, donations)}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Full Audit CSV
+                </Button>
+              </div>
+            </div>
             {campaigns.map((camp) => (
               <Card key={camp.id} className="p-5 space-y-3.5">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -507,6 +547,27 @@ export function AdminWorkspace({
                           {t('admin.uploadPaidReceipt')}
                         </Button>
                       )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => exportSingleCampaignCsv(camp, donations)}
+                      title="Download CSV report for this campaign"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      CSV
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={async () => {
+                        if (!window.confirm(`Delete campaign ${camp.campaign_code}?`)) return;
+                        await onDeleteCampaign(camp.id);
+                        setNotice(`Deleted campaign ${camp.campaign_code} from database.`);
+                      }}
+                      title="Delete Campaign"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 </div>
 
@@ -555,19 +616,33 @@ export function AdminWorkspace({
                       </p>
                     </div>
 
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={async () => {
-                        await onConfirmDonation(d.id);
-                        setNotice(
-                          `Confirmed ${formatPKR(d.amount_pkr)} (Ref: ${d.transaction_ref}) — progress bar & donor count updated!`
-                        );
-                      }}
-                    >
-                      <CheckCircle2 className="h-4 w-4" />
-                      {t('admin.confirmPayment')}
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={async () => {
+                          await onConfirmDonation(d.id);
+                          setNotice(
+                            `Confirmed ${formatPKR(d.amount_pkr)} (Ref: ${d.transaction_ref}) — progress bar & donor count updated!`
+                          );
+                        }}
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        {t('admin.confirmPayment')}
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={async () => {
+                          if (!window.confirm(`Delete donation ref ${d.transaction_ref}?`)) return;
+                          await onDeleteDonation(d.id);
+                          setNotice(`Deleted donation ${d.transaction_ref}.`);
+                        }}
+                        title="Delete Donation"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -701,13 +776,27 @@ export function AdminWorkspace({
                       {v.district} · {v.tehsil}
                     </p>
                   </div>
-                  <Button
-                    variant={v.is_accredited_verifier ? 'outline' : 'primary'}
-                    size="sm"
-                    onClick={() => onToggleVerifier(v.id, !v.is_accredited_verifier)}
-                  >
-                    {v.is_accredited_verifier ? t('admin.revoke') : t('admin.accredit')}
-                  </Button>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      variant={v.is_accredited_verifier ? 'outline' : 'primary'}
+                      size="sm"
+                      onClick={() => onToggleVerifier(v.id, !v.is_accredited_verifier)}
+                    >
+                      {v.is_accredited_verifier ? t('admin.revoke') : t('admin.accredit')}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={async () => {
+                        if (!window.confirm(`Delete verifier profile ${v.full_name}?`)) return;
+                        await onDeleteProfile(v.id);
+                        setNotice(`Deleted verifier ${v.full_name}.`);
+                      }}
+                      title="Delete Profile"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
               ))}
             </Card>
@@ -729,23 +818,37 @@ export function AdminWorkspace({
                       <p className="font-mono font-bold text-emerald-900">{c.case_code}</p>
                       <p className="truncate text-slate-600">{c.vendor_name}</p>
                     </div>
-                    <Button
-                      variant="gold"
-                      size="sm"
-                      onClick={async () => {
-                        const rcpt = makeInvoiceDataUrl(
-                          `Paid Vendor Receipt (${c.case_code})`,
-                          c.vendor_name,
-                          c.raised_amount_pkr || c.target_amount_pkr,
-                          `RCPT-${c.case_code}`,
-                          true
-                        );
-                        await onUploadCaseReceipt(c.id, rcpt);
-                        setNotice(`Closed loop with Paid Vendor Receipt for ${c.case_code}!`);
-                      }}
-                    >
-                      Mark Paid
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        variant="gold"
+                        size="sm"
+                        onClick={async () => {
+                          const rcpt = makeInvoiceDataUrl(
+                            `Paid Vendor Receipt (${c.case_code})`,
+                            c.vendor_name,
+                            c.raised_amount_pkr || c.target_amount_pkr,
+                            `RCPT-${c.case_code}`,
+                            true
+                          );
+                          await onUploadCaseReceipt(c.id, rcpt);
+                          setNotice(`Closed loop with Paid Vendor Receipt for ${c.case_code}!`);
+                        }}
+                      >
+                        Mark Paid
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={async () => {
+                          if (!window.confirm(`Delete case ${c.case_code}?`)) return;
+                          await onDeleteCase(c.id);
+                          setNotice(`Deleted case ${c.case_code}.`);
+                        }}
+                        title="Delete Case"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 ))}
             </Card>
@@ -1108,9 +1211,9 @@ export function AdminWorkspace({
             </Card>
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-2xl bg-emerald-950 p-4 text-white">
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-emerald-950 p-4 text-white">
             <p className="text-xs text-emerald-100/85">
-              Last updated:{' '}
+              Directly synced to live database (<code>public.app_settings</code>) · Last saved:{' '}
               <strong>{new Date(settings.updated_at).toLocaleString('en-GB')}</strong>
             </p>
             <Button type="submit" variant="gold" size="lg" disabled={savingSettings}>
@@ -1118,6 +1221,54 @@ export function AdminWorkspace({
               <span>{savingSettings ? 'Saving...' : 'Save All Settings & Accounts'}</span>
             </Button>
           </div>
+
+          {/* Production Go-Live: Flush All Dummy / Seed Data */}
+          <Card className="p-6 border-rose-200 bg-rose-50/40 space-y-3">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-sm font-extrabold text-rose-950">
+                  Production Go-Live: Flush All Dummy / Seed Data
+                </h3>
+                <p className="text-xs text-rose-900/85 mt-0.5">
+                  Permanently deletes all sample campaigns, sample cases, sample verifiers, and
+                  demo donations from Supabase so your platform starts 100% clean for real Zakat
+                  funding. Your Admin Settings, Social Links, Escrow Accounts, and real Google
+                  users are preserved.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+              <Input
+                value={flushConfirmText}
+                onChange={(e) => setFlushConfirmText(e.target.value)}
+                placeholder='Type "FLUSH DEMO DATA" to confirm'
+                className="font-mono border-rose-300"
+              />
+              <Button
+                type="button"
+                variant="danger"
+                size="md"
+                disabled={flushing || flushConfirmText.trim() !== 'FLUSH DEMO DATA'}
+                onClick={async () => {
+                  setFlushing(true);
+                  try {
+                    await onFlushDummyData();
+                    setFlushConfirmText('');
+                    setNotice(
+                      'All dummy/seed data flushed cleanly! Your live database is now ready for real funding.'
+                    );
+                  } finally {
+                    setFlushing(false);
+                  }
+                }}
+                className="shrink-0"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>{flushing ? 'Flushing...' : 'Flush All Dummy Data'}</span>
+              </Button>
+            </div>
+          </Card>
         </form>
       )}
 

@@ -29,6 +29,7 @@ import { AdminWorkspace } from '@/components/AdminWorkspace';
 import { AdminAuthModal } from '@/components/AdminAuthModal';
 import { UserAuthModal, PENDING_OAUTH_KEY } from '@/components/UserAuthModal';
 import { DonorDashboard } from '@/components/DonorDashboard';
+import { VerifierQrScannerModal } from '@/components/VerifierQrScannerModal';
 import { SocialBar } from '@/components/SocialBar';
 import { MobileBottomNav } from '@/components/MobileBottomNav';
 
@@ -46,6 +47,7 @@ export default function App() {
     hasValidAdminSession()
   );
   const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
+  const [showVerifierScanner, setShowVerifierScanner] = useState(false);
 
   const [currentUser, setCurrentUser] = useState<AuthUserSession | null>(() => {
     try {
@@ -110,38 +112,46 @@ export default function App() {
         : {};
       localStorage.removeItem(PENDING_OAUTH_KEY);
 
-      const role = pending.role ?? 'donor';
       const fullName =
         pending.fullName ||
         (session.user.user_metadata?.full_name as string | undefined) ||
         session.user.email?.split('@')[0] ||
         'Amanat User';
 
-      let profileId: string | undefined;
-      if (role === 'verifier') {
-        const prof = await dataClient.registerVerifierProfile({
-          full_name: fullName,
-          email: session.user.email ?? '',
-          district: pending.district ?? 'Lahore',
-          tehsil: pending.tehsil ?? 'Lahore City',
-        });
-        profileId = prof.id;
-        await refreshData();
-      }
+      const prof = await dataClient.upsertUserProfile({
+        auth_user_id: session.user.id,
+        email: session.user.email ?? '',
+        full_name: fullName,
+        role: pending.role,
+        district: pending.district,
+        tehsil: pending.tehsil,
+        applyAsVerifier: pending.role === 'verifier',
+      });
+      await refreshData();
+
+      const resolvedRole: 'donor' | 'beneficiary' | 'verifier' =
+        pending.role ??
+        (prof.role === 'verifier' || prof.is_accredited_verifier
+          ? 'verifier'
+          : prof.role === 'beneficiary'
+          ? 'beneficiary'
+          : 'donor');
 
       const authSession: AuthUserSession = {
         id: session.user.id,
         email: session.user.email ?? '',
-        full_name: fullName,
-        role,
+        full_name: prof.full_name || fullName,
+        role: resolvedRole,
         provider: 'google',
-        district: pending.district ?? 'Lahore',
-        tehsil: pending.tehsil ?? 'Lahore City',
-        profile_id: profileId,
+        district: prof.district || pending.district || 'Lahore',
+        tehsil: prof.tehsil || pending.tehsil || 'Lahore City',
+        profile_id: prof.id,
       };
       setCurrentUser(authSession);
       localStorage.setItem(USER_SESSION_KEY, JSON.stringify(authSession));
-      setActiveRole(role);
+      if (pending.role) {
+        setActiveRole(pending.role);
+      }
     });
     return () => subscription.unsubscribe();
   }, [refreshData]);
@@ -201,17 +211,20 @@ export default function App() {
   };
 
   const handleUserAuthenticated = async (session: AuthUserSession) => {
-    let enriched = session;
-    if (session.role === 'verifier') {
-      const prof = await dataClient.registerVerifierProfile({
-        full_name: session.full_name,
-        email: session.email,
-        district: session.district,
-        tehsil: session.tehsil,
-      });
-      enriched = { ...session, profile_id: prof.id };
-      await refreshData();
-    }
+    const prof = await dataClient.upsertUserProfile({
+      email: session.email,
+      full_name: session.full_name,
+      role: session.role,
+      district: session.district,
+      tehsil: session.tehsil,
+      applyAsVerifier: session.role === 'verifier',
+    });
+    const enriched: AuthUserSession = {
+      ...session,
+      full_name: prof.full_name || session.full_name,
+      profile_id: prof.id,
+    };
+    await refreshData();
     setCurrentUser(enriched);
     localStorage.setItem(USER_SESSION_KEY, JSON.stringify(enriched));
     setAuthModalRole(null);
@@ -284,6 +297,7 @@ export default function App() {
         currentUser={currentUser}
         onOpenUserAuth={(role) => setAuthModalRole(role ?? 'donor')}
         onSignOutUser={handleSignOutUser}
+        onOpenVerifierScanner={() => setShowVerifierScanner(true)}
       />
 
       <main className="flex-1">
@@ -302,6 +316,7 @@ export default function App() {
                 setCaseFilter(cat as CaseFilterKey);
                 document.getElementById('cases')?.scrollIntoView({ behavior: 'smooth' });
               }}
+              onOpenVerifierScanner={() => setShowVerifierScanner(true)}
             />
 
             <TransparencyStrip
@@ -309,7 +324,7 @@ export default function App() {
               accreditedVerifiersCount={accreditedVerifiersCount}
             />
 
-            {currentUser?.role === 'donor' && (
+            {currentUser && (
               <DonorDashboard
                 user={currentUser}
                 donations={donations}
@@ -343,6 +358,7 @@ export default function App() {
           <BeneficiaryWorkspace
             currentUser={currentUser}
             onOpenAuth={() => setAuthModalRole('beneficiary')}
+            onOpenVerifierScanner={() => setShowVerifierScanner(true)}
             cases={cases}
             profiles={profiles}
             onSubmitCase={async (payload) => {
@@ -356,6 +372,22 @@ export default function App() {
             currentUser={currentUser}
             profiles={profiles}
             onOpenAuth={() => setAuthModalRole('verifier')}
+            onApplyAsVerifier={async (district, tehsil) => {
+              if (!currentUser) return;
+              const prof = await dataClient.upsertUserProfile({
+                auth_user_id: currentUser.id,
+                email: currentUser.email,
+                full_name: currentUser.full_name,
+                district,
+                tehsil,
+                role: 'verifier',
+                applyAsVerifier: true,
+              });
+              const updated = { ...currentUser, profile_id: prof.id, district, tehsil };
+              setCurrentUser(updated);
+              localStorage.setItem(USER_SESSION_KEY, JSON.stringify(updated));
+              await refreshData();
+            }}
             cases={cases}
             verifications={verifications}
             onSubmitVerification={async (payload) => {
@@ -417,6 +449,26 @@ export default function App() {
               await dataClient.sendTestMilestoneNotification();
               await refreshData();
             }}
+            onDeleteCampaign={async (id) => {
+              await dataClient.deleteCampaign(id);
+              await refreshData();
+            }}
+            onDeleteCase={async (id) => {
+              await dataClient.deleteCase(id);
+              await refreshData();
+            }}
+            onDeleteDonation={async (id) => {
+              await dataClient.deleteDonation(id);
+              await refreshData();
+            }}
+            onDeleteProfile={async (id) => {
+              await dataClient.deleteProfile(id);
+              await refreshData();
+            }}
+            onFlushDummyData={async () => {
+              await dataClient.flushAllDummyData();
+              await refreshData();
+            }}
             onLogoutAdmin={handleLogoutAdmin}
           />
         ) : null}
@@ -459,11 +511,17 @@ export default function App() {
         onSuccess={handleUserAuthenticated}
       />
 
+      <VerifierQrScannerModal
+        isOpen={showVerifierScanner}
+        profiles={profiles}
+        onClose={() => setShowVerifierScanner(false)}
+      />
+
       <PaymentModal
         target={donationTarget}
         language={language}
         escrowAccounts={settings.escrow_accounts}
-        defaultDonorEmail={currentUser?.role === 'donor' ? currentUser.email : ''}
+        defaultDonorEmail={currentUser?.email ?? ''}
         onClose={() => setDonationTarget(null)}
         onSubmitPledge={async (payload) => {
           const created = await dataClient.submitDonationPledge(payload);

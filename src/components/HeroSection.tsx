@@ -9,6 +9,7 @@ import {
   GraduationCap,
   Wheat,
   Gem,
+  QrCode,
 } from 'lucide-react';
 import { Button } from './ui/primitives';
 
@@ -125,10 +126,12 @@ export function HeroSection({
   onExploreCases,
   onRequestAssistance,
   onSelectCategory,
+  onOpenVerifierScanner,
 }: {
   onExploreCases: () => void;
   onRequestAssistance: () => void;
   onSelectCategory: (cat: string) => void;
+  onOpenVerifierScanner: () => void;
 }) {
   const { t } = useTranslation();
 
@@ -178,6 +181,15 @@ export function HeroSection({
             >
               <HeartHandshake className="h-4 w-4 text-gold-300" />
               <span>{t('hero.ctaRequest')}</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="md"
+              onClick={onOpenVerifierScanner}
+              className="bg-emerald-900/60 text-gold-200 border-gold-400/40 hover:bg-emerald-800/80"
+            >
+              <QrCode className="h-4 w-4 text-gold-300" />
+              <span>Verify Verifier (Scan QR)</span>
             </Button>
           </div>
         </motion.div>

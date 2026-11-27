@@ -46,6 +46,8 @@ export type DonationStatus =
 
 export interface Profile {
   id: string;
+  auth_user_id?: string | null;
+  email?: string | null;
   full_name: string;
   phone: string;
   role: UserRole;
@@ -53,7 +55,9 @@ export interface Profile {
   tehsil: string;
   cnic_hash: string;
   is_accredited_verifier: boolean;
+  verifier_applied?: boolean;
   verifier_badge_title: string | null;
+  verifier_qr_secret?: string | null;
 }
 
 export interface CrowdfundingCampaign {

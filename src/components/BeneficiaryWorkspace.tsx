@@ -12,7 +12,9 @@ import {
   MapPin,
   Lock,
   UserPlus,
+  QrCode,
 } from 'lucide-react';
+import { BeneficiaryDigitalCard } from './DigitalCards';
 import type {
   AuthUserSession,
   CaseCategory,
@@ -30,6 +32,7 @@ import { SmartImageCapture } from './SmartImageCapture';
 interface BeneficiaryWorkspaceProps {
   currentUser: AuthUserSession | null;
   onOpenAuth: () => void;
+  onOpenVerifierScanner: () => void;
   cases: WelfareCase[];
   profiles: Profile[];
   onSubmitCase: (payload: {
@@ -73,6 +76,7 @@ function formatCnic(raw: string): string {
 export function BeneficiaryWorkspace({
   currentUser,
   onOpenAuth,
+  onOpenVerifierScanner,
   cases,
   profiles,
   onSubmitCase,
@@ -101,7 +105,8 @@ export function BeneficiaryWorkspace({
   const [submitting, setSubmitting] = useState(false);
   const [justCreated, setJustCreated] = useState<string | null>(null);
 
-  const isBeneficiarySignedIn = currentUser?.role === 'beneficiary';
+  // Any signed-in Google/Email user has instant access (never asks to sign in again!)
+  const isBeneficiarySignedIn = Boolean(currentUser);
 
   const myCases = cases.filter(
     (c) =>
@@ -180,18 +185,30 @@ export function BeneficiaryWorkspace({
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 space-y-8">
-      <div className="rounded-3xl bg-emerald-950 p-6 sm:p-8 text-white shadow-glass-lg">
-        <Badge
+      <div className="rounded-3xl bg-emerald-950 p-6 sm:p-8 text-white shadow-glass-lg flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <Badge
+            variant="gold"
+            className="mb-2 bg-gold-500/20 text-gold-200 border-gold-400/30"
+          >
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Signed in as {currentUser!.full_name} ({currentUser!.email}) · 100% Confidential
+          </Badge>
+          <h1 className="text-2xl sm:text-3xl font-extrabold">{t('beneficiary.title')}</h1>
+          <p className="mt-2 max-w-2xl text-sm text-emerald-100/85">
+            {t('beneficiary.subtitle')}
+          </p>
+        </div>
+
+        <Button
           variant="gold"
-          className="mb-2 bg-gold-500/20 text-gold-200 border-gold-400/30"
+          size="md"
+          onClick={onOpenVerifierScanner}
+          className="shrink-0"
         >
-          <ShieldCheck className="h-3.5 w-3.5" />
-          Signed in as {currentUser.full_name} ({currentUser.email}) · 100% Confidential
-        </Badge>
-        <h1 className="text-2xl sm:text-3xl font-extrabold">{t('beneficiary.title')}</h1>
-        <p className="mt-2 max-w-2xl text-sm text-emerald-100/85">
-          {t('beneficiary.subtitle')}
-        </p>
+          <QrCode className="h-4 w-4" />
+          <span>Verify Visitor (Scan QR)</span>
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
@@ -449,6 +466,10 @@ export function BeneficiaryWorkspace({
             const verifier = profiles.find((p) => p.id === c.assigned_verifier_id);
             return (
               <Card key={c.id} className="p-5 space-y-3.5">
+                <BeneficiaryDigitalCard
+                  welfareCase={c}
+                  assignedVerifierName={verifier?.full_name}
+                />
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-xs font-extrabold text-emerald-900 bg-emerald-100 px-2.5 py-1 rounded-lg">
                     {c.case_code}

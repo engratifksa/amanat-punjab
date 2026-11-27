@@ -31,6 +31,7 @@ import {
   dispatchMultiChannelNotification,
   type BuildMilestoneNotificationArgs,
 } from './notifications';
+import { generateQrSecretHex } from './dynamicQr';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -720,6 +721,33 @@ export const dataClient = {
         .from('cases')
         .update({ status: 'pending_field_visit', assigned_verifier_id: verifierId })
         .eq('id', caseId);
+      const { data: c } = await supabase.from('cases').select('*').eq('id', caseId).maybeSingle();
+      const { data: v } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', verifierId)
+        .maybeSingle();
+      if (c) {
+        const benEmails = (c as WelfareCase).beneficiary_account_email
+          ? [(c as WelfareCase).beneficiary_account_email!]
+          : [];
+        await emitNotification(
+          {
+            event_type: 'case_submitted',
+            audience: 'beneficiary',
+            target_code: (c as WelfareCase).case_code,
+            case_id: (c as WelfareCase).id,
+            campaign_id: null,
+            title_en: `Field Verifier Assigned (${(c as WelfareCase).case_code}) — How to Verify Visitor`,
+            title_ur: `فیلڈ ویریفائر تفویض کر دیا گیا (${(c as WelfareCase).case_code}) — کیو آر تصدیق کا طریقہ`,
+            body_en: `Accredited Field Verifier ${(v as Profile | null)?.full_name ?? 'Local Volunteer'} (${(c as WelfareCase).district}) will visit your household. SAFETY GUIDE: Before sharing your CNIC, open Amanat → tap "Verify Verifier (Scan QR)" and scan their live 60-second QR ID Card (or enter their live 6-digit code). Never accept screenshots and NEVER pay any fee or cash.`,
+            body_ur: `مستند فیلڈ ویریفائر ${(v as Profile | null)?.full_name ?? 'مقامی رضاکار'} جلد آپ کے گھر کا دورہ کریں گے۔ حفاظتی ہدایت: اپنا شناختی کارڈ دکھانے سے پہلے امانت ایپ میں "Verify Verifier (Scan QR)" کھول کر ان کے فون پر موجود 60 سیکنڈ والا لائیو کیو آر کوڈ اسکین کریں۔ کبھی بھی اسکرین شاٹ قبول نہ کریں اور ہرگز کوئی فیس یا نقد رقم نہ دیں۔`,
+            vendor_name: (c as WelfareCase).vendor_name,
+            district: (c as WelfareCase).district,
+          },
+          benEmails
+        );
+      }
       return;
     }
     await localDb.cases.update(caseId, {
@@ -729,20 +757,150 @@ export const dataClient = {
     const c = await localDb.cases.get(caseId);
     const v = await localDb.profiles.get(verifierId);
     if (c) {
-      await emitNotification({
-        event_type: 'case_submitted',
-        audience: 'beneficiary',
-        target_code: c.case_code,
-        case_id: c.id,
-        campaign_id: null,
-        title_en: `Field Verifier Assigned (${c.case_code})`,
-        title_ur: `فیلڈ ویریفائر تفویض کر دیا گیا (${c.case_code})`,
-        body_en: `Admin approved your request for ground verification. Accredited Field Verifier ${v?.full_name ?? 'Local Volunteer'} (${c.district}) will contact you soon.`,
-        body_ur: `ایڈمن نے آپ کی درخواست فیلڈ تصدیق کے لیے منظور کر لی ہے۔ مستند فیلڈ ویریفائر جلد آپ سے رابطہ کریں گے۔`,
-        vendor_name: c.vendor_name,
-        district: c.district,
-      });
+      await emitNotification(
+        {
+          event_type: 'case_submitted',
+          audience: 'beneficiary',
+          target_code: c.case_code,
+          case_id: c.id,
+          campaign_id: null,
+          title_en: `Field Verifier Assigned (${c.case_code}) — How to Verify Visitor`,
+          title_ur: `فیلڈ ویریفائر تفویض کر دیا گیا (${c.case_code}) — کیو آر تصدیق کا طریقہ`,
+          body_en: `Accredited Field Verifier ${v?.full_name ?? 'Local Volunteer'} (${c.district}) will visit your household. SAFETY GUIDE: Before sharing your CNIC, open Amanat → tap "Verify Verifier (Scan QR)" and scan their live 60-second QR ID Card (or enter their live 6-digit code). Never accept screenshots and NEVER pay any fee or cash.`,
+          body_ur: `مستند فیلڈ ویریفائر ${v?.full_name ?? 'مقامی رضاکار'} جلد آپ کے گھر کا دورہ کریں گے۔ حفاظتی ہدایت: اپنا شناختی کارڈ دکھانے سے پہلے امانت ایپ میں "Verify Verifier (Scan QR)" کھول کر ان کے فون پر موجود 60 سیکنڈ والا لائیو کیو آر کوڈ اسکین کریں۔ کبھی بھی اسکرین شاٹ قبول نہ کریں اور ہرگز کوئی فیس یا نقد رقم نہ دیں۔`,
+          vendor_name: c.vendor_name,
+          district: c.district,
+        },
+        c.beneficiary_account_email ? [c.beneficiary_account_email] : []
+      );
     }
+  },
+
+  async upsertUserProfile(input: {
+    auth_user_id?: string | null;
+    email: string;
+    full_name: string;
+    role?: 'donor' | 'beneficiary' | 'verifier';
+    district?: string;
+    tehsil?: string;
+    applyAsVerifier?: boolean;
+  }): Promise<Profile> {
+    await ensureLocalSeeded();
+    const cleanEmail = input.email.trim().toLowerCase();
+    const cleanName = input.full_name.trim() || cleanEmail.split('@')[0] || 'Amanat User';
+
+    if (supabase) {
+      // 1. Lookup by auth_user_id first, then email, then full_name
+      let existing: Profile | null = null;
+      if (input.auth_user_id) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('auth_user_id', input.auth_user_id)
+          .maybeSingle();
+        if (data) existing = data as Profile;
+      }
+      if (!existing && cleanEmail) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .ilike('email', cleanEmail)
+          .limit(1);
+        if (data && data.length > 0) existing = data[0] as Profile;
+      }
+      if (!existing) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .ilike('full_name', cleanName)
+          .limit(1);
+        if (data && data.length > 0) existing = data[0] as Profile;
+      }
+
+      if (existing) {
+        const patch: Partial<Profile> = {
+          email: existing.email || cleanEmail,
+          auth_user_id: existing.auth_user_id || input.auth_user_id || null,
+        };
+        if (input.applyAsVerifier) {
+          patch.role = 'verifier';
+          patch.verifier_applied = true;
+          if (input.district) patch.district = input.district;
+          if (input.tehsil) patch.tehsil = input.tehsil;
+          if (!existing.is_accredited_verifier) {
+            patch.verifier_badge_title = `Pending Admin Approval — ${input.district || existing.district}`;
+          }
+        }
+        const { data } = await supabase
+          .from('profiles')
+          .update(patch)
+          .eq('id', existing.id)
+          .select()
+          .single();
+        return (data as Profile) ?? { ...existing, ...patch };
+      }
+
+      const newProf: Profile = {
+        id: generateId(input.applyAsVerifier ? 'prof-ver' : 'prof-usr'),
+        auth_user_id: input.auth_user_id || null,
+        email: cleanEmail,
+        full_name: cleanName,
+        phone: cleanEmail,
+        role: input.applyAsVerifier ? 'verifier' : input.role ?? 'donor',
+        district: input.district || 'Lahore',
+        tehsil: input.tehsil || 'Lahore City',
+        cnic_hash: `google:${cleanEmail}`,
+        is_accredited_verifier: false,
+        verifier_applied: Boolean(input.applyAsVerifier),
+        verifier_badge_title: input.applyAsVerifier
+          ? `Pending Admin Approval — ${input.district || 'Lahore'}`
+          : null,
+        verifier_qr_secret: null,
+      };
+      const { data, error } = await supabase.from('profiles').insert(newProf).select().single();
+      if (error) throw error;
+      return data as Profile;
+    }
+
+    // Local Dexie fallback
+    const existing = await localDb.profiles
+      .filter(
+        (p) =>
+          (p.email && p.email.toLowerCase() === cleanEmail) ||
+          p.full_name.toLowerCase() === cleanName.toLowerCase()
+      )
+      .first();
+
+    if (existing) {
+      const patch: Partial<Profile> = { email: existing.email || cleanEmail };
+      if (input.applyAsVerifier) {
+        patch.role = 'verifier';
+        patch.verifier_applied = true;
+        if (input.district) patch.district = input.district;
+        if (input.tehsil) patch.tehsil = input.tehsil;
+      }
+      await localDb.profiles.update(existing.id, patch);
+      return { ...existing, ...patch };
+    }
+
+    const newProf: Profile = {
+      id: generateId(input.applyAsVerifier ? 'prof-ver' : 'prof-usr'),
+      email: cleanEmail,
+      full_name: cleanName,
+      phone: cleanEmail,
+      role: input.applyAsVerifier ? 'verifier' : input.role ?? 'donor',
+      district: input.district || 'Lahore',
+      tehsil: input.tehsil || 'Lahore City',
+      cnic_hash: `google:${cleanEmail}`,
+      is_accredited_verifier: false,
+      verifier_applied: Boolean(input.applyAsVerifier),
+      verifier_badge_title: input.applyAsVerifier
+        ? `Pending Admin Approval — ${input.district || 'Lahore'}`
+        : null,
+      verifier_qr_secret: null,
+    };
+    await localDb.profiles.put(newProf);
+    return newProf;
   },
 
   async registerVerifierProfile(input: {
@@ -751,54 +909,17 @@ export const dataClient = {
     district: string;
     tehsil: string;
     phone?: string;
+    auth_user_id?: string | null;
   }): Promise<Profile> {
-    await ensureLocalSeeded();
-    if (supabase) {
-      const { data: existingList } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('role', 'verifier')
-        .ilike('full_name', input.full_name.trim())
-        .limit(1);
-      if (existingList && existingList.length > 0) {
-        return existingList[0] as Profile;
-      }
-      const prof: Profile = {
-        id: generateId('prof-ver'),
-        full_name: input.full_name.trim(),
-        phone: input.phone?.trim() || input.email,
-        role: 'verifier',
-        district: input.district,
-        tehsil: input.tehsil,
-        cnic_hash: `google:${input.email}`,
-        is_accredited_verifier: false,
-        verifier_badge_title: `Pending Admin Approval — ${input.district}`,
-      };
-      const { data, error } = await supabase.from('profiles').insert(prof).select().single();
-      if (error) throw error;
-      return data as Profile;
-    }
-
-    const existing = await localDb.profiles
-      .filter(
-        (p) => p.role === 'verifier' && p.full_name.toLowerCase() === input.full_name.toLowerCase()
-      )
-      .first();
-    if (existing) return existing;
-
-    const prof: Profile = {
-      id: generateId('prof-ver'),
-      full_name: input.full_name.trim(),
-      phone: input.phone?.trim() || input.email,
-      role: 'verifier',
+    return this.upsertUserProfile({
+      auth_user_id: input.auth_user_id,
+      email: input.email,
+      full_name: input.full_name,
       district: input.district,
       tehsil: input.tehsil,
-      cnic_hash: `google:${input.email}`,
-      is_accredited_verifier: false,
-      verifier_badge_title: `Pending Admin Approval — ${input.district}`,
-    };
-    await localDb.profiles.put(prof);
-    return prof;
+      role: 'verifier',
+      applyAsVerifier: true,
+    });
   },
 
   async submitFieldVerification(input: CreateVerificationInput): Promise<FieldVerification> {
@@ -902,10 +1023,15 @@ export const dataClient = {
   async toggleVerifierAccreditation(profileId: string, accredited: boolean): Promise<void> {
     await ensureLocalSeeded();
     const badge = accredited ? 'Accredited Field Verifier — Punjab' : 'Pending Accreditation';
+    const qrSecret = accredited ? generateQrSecretHex() : null;
     if (supabase) {
       const { error } = await supabase
         .from('profiles')
-        .update({ is_accredited_verifier: accredited, verifier_badge_title: badge })
+        .update({
+          is_accredited_verifier: accredited,
+          verifier_badge_title: badge,
+          verifier_qr_secret: qrSecret,
+        })
         .eq('id', profileId);
       if (error) throw error;
       return;
@@ -913,7 +1039,79 @@ export const dataClient = {
     await localDb.profiles.update(profileId, {
       is_accredited_verifier: accredited,
       verifier_badge_title: badge,
+      verifier_qr_secret: qrSecret,
     });
+  },
+
+  async deleteCampaign(id: string): Promise<void> {
+    await ensureLocalSeeded();
+    if (supabase) {
+      await supabase.from('crowdfunding_campaigns').delete().eq('id', id);
+      return;
+    }
+    await localDb.crowdfunding_campaigns.delete(id);
+  },
+
+  async deleteCase(id: string): Promise<void> {
+    await ensureLocalSeeded();
+    if (supabase) {
+      await supabase.from('cases').delete().eq('id', id);
+      return;
+    }
+    await localDb.cases.delete(id);
+  },
+
+  async deleteDonation(id: string): Promise<void> {
+    await ensureLocalSeeded();
+    if (supabase) {
+      await supabase.from('donations').delete().eq('id', id);
+      return;
+    }
+    await localDb.donations.delete(id);
+  },
+
+  async deleteProfile(id: string): Promise<void> {
+    await ensureLocalSeeded();
+    if (supabase) {
+      await supabase.from('profiles').delete().eq('id', id);
+      return;
+    }
+    await localDb.profiles.delete(id);
+  },
+
+  async flushAllDummyData(): Promise<void> {
+    await ensureLocalSeeded();
+    const dummyCampIds = ['camp-1', 'camp-2', 'camp-3'];
+    const dummyCaseIds = [
+      'case-1',
+      'case-2',
+      'case-3',
+      'case-4',
+      'case-5',
+      'case-6',
+      'case-7',
+      'case-8',
+    ];
+    const dummyProfIds = ['prof-ver-1', 'prof-ver-2', 'prof-ver-3', 'prof-ver-4', 'prof-ben-1'];
+    const dummyDonIds = ['don-1', 'don-2', 'don-3'];
+
+    if (supabase) {
+      await supabase.from('donations').delete().in('id', dummyDonIds);
+      await supabase.from('donations').delete().in('campaign_id', dummyCampIds);
+      await supabase.from('donations').delete().in('case_id', dummyCaseIds);
+      await supabase.from('field_verifications').delete().in('case_id', dummyCaseIds);
+      await supabase.from('cases').delete().in('id', dummyCaseIds);
+      await supabase.from('crowdfunding_campaigns').delete().in('id', dummyCampIds);
+      await supabase.from('profiles').delete().in('id', dummyProfIds);
+      await supabase.from('notifications').delete().in('campaign_id', dummyCampIds);
+      return;
+    }
+
+    await localDb.donations.bulkDelete(dummyDonIds);
+    await localDb.cases.bulkDelete(dummyCaseIds);
+    await localDb.crowdfunding_campaigns.bulkDelete(dummyCampIds);
+    await localDb.profiles.bulkDelete(dummyProfIds);
+    await localDb.notifications.clear();
   },
 
   async submitDonationPledge(input: CreateDonationInput): Promise<Donation> {
