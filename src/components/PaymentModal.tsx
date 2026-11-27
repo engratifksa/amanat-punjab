@@ -148,11 +148,11 @@ export function PaymentModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-emerald-950/60 p-4 backdrop-blur-sm overflow-y-auto"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-emerald-950/60 p-3 sm:p-4 backdrop-blur-sm overflow-y-auto"
       role="dialog"
       aria-modal="true"
     >
-      <div className="relative my-8 w-full max-w-2xl rounded-3xl bg-white shadow-glass-lg border border-emerald-900/15 overflow-hidden">
+      <div className="relative my-auto w-full max-w-2xl rounded-2xl sm:rounded-3xl bg-white shadow-glass-lg border border-emerald-900/15 overflow-hidden">
         {/* Modal Header */}
         <div className="flex items-start justify-between gap-4 bg-emerald-950 px-6 py-5 text-white">
           <div>

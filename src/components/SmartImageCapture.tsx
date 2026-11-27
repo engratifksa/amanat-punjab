@@ -108,8 +108,8 @@ export function SmartImageCapture({
           disabled={processing}
           className="border-emerald-900/20 bg-emerald-50/50 text-emerald-950"
         >
-          <Camera className="h-4 w-4 text-emerald-700" />
-          <span>{processing ? 'Processing...' : 'Take Photo (Camera)'}</span>
+          <Camera className="h-4 w-4 text-emerald-700 shrink-0" />
+          <span>{processing ? 'Processing...' : 'Take Photo'}</span>
         </Button>
 
         <Button
@@ -119,7 +119,7 @@ export function SmartImageCapture({
           onClick={() => uploadRef.current?.click()}
           disabled={processing}
         >
-          <Upload className="h-4 w-4 text-gold-600" />
+          <Upload className="h-4 w-4 text-gold-600 shrink-0" />
           <span>Upload Photo</span>
         </Button>
 

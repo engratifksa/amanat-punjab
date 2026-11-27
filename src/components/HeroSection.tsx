@@ -48,13 +48,13 @@ function PakistanGlobeWithRing({
   ];
 
   return (
-    <div className="relative flex h-[290px] w-[290px] sm:h-[330px] sm:w-[330px] items-center justify-center select-none">
+    <div className="relative flex h-[266px] w-[266px] sm:h-[330px] sm:w-[330px] items-center justify-center select-none">
       {/* Whisper-thin luminous golden orbital ring */}
       <div className="pointer-events-none absolute inset-4 rounded-full border border-gold-300/45 shadow-[0_0_28px_rgba(245,158,11,0.16)]" />
       <div className="pointer-events-none absolute inset-10 rounded-full border border-emerald-400/15" />
 
       {/* Geographically Accurate Pakistan (Emerald) & Punjab (Gold) Dotted-Emerald Globe */}
-      <div className="relative h-48 w-48 sm:h-56 sm:w-56 rounded-full overflow-hidden">
+      <div className="relative h-44 w-44 sm:h-56 sm:w-56 rounded-full overflow-hidden">
         <img
           src="https://lizwbjvngqdqntqhnude.supabase.co/storage/v1/object/public/amanat-media/hero-globe.jpg"
           alt="Impact globe highlighting Pakistan and Punjab"

@@ -48,25 +48,29 @@ export function Header({
   const { t } = useTranslation();
 
   return (
-    <header className="sticky top-0 z-40 border-b border-emerald-900/10 bg-white/80 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+    <header className="sticky top-0 z-40 border-b border-emerald-900/10 bg-white/85 backdrop-blur-xl">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-3 py-2.5 sm:px-6 sm:py-3">
         {/* Brand Logo */}
         <a
           href="#top"
           onClick={() => onChangeRole('donor')}
-          className="flex items-center gap-2.5 group"
+          className="flex items-center gap-2 sm:gap-2.5 group min-w-0 shrink"
         >
-          <AmanatLogo className="h-10 w-10 shrink-0 shadow-sm transition-transform duration-200 group-hover:scale-105" />
-          <div className="leading-tight">
-            <div className="flex items-center gap-1.5">
-              <span className="text-lg font-extrabold tracking-tight text-emerald-950">
+          <AmanatLogo className="h-9 w-9 sm:h-10 sm:w-10 shrink-0 shadow-sm transition-transform duration-200 group-hover:scale-105" />
+          <div className="leading-tight min-w-0">
+            <div className="flex items-center gap-1 sm:gap-1.5">
+              <span className="text-base sm:text-lg font-extrabold tracking-tight text-emerald-950 truncate">
                 {t('appName')}
               </span>
-              <span className="text-sm font-bold text-gold-600">{t('appNameUr')}</span>
+              <span className="text-xs sm:text-sm font-bold text-gold-600 shrink-0">
+                {t('appNameUr')}
+              </span>
             </div>
-            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500">
-              <ShieldCheck className="h-3 w-3 text-emerald-600" />
-              <span>{dataMode === 'supabase' ? 'Supabase Live' : 'Dexie Local PWA'}</span>
+            <div className="hidden xs:flex sm:flex items-center gap-1 text-[10px] font-semibold text-slate-500">
+              <ShieldCheck className="h-3 w-3 text-emerald-600 shrink-0" />
+              <span className="truncate">
+                {dataMode === 'supabase' ? 'Supabase Live' : 'Dexie Local PWA'}
+              </span>
             </div>
           </div>
         </a>
@@ -112,11 +116,13 @@ export function Header({
         </div>
 
         {/* Right Controls: User Sign-In + Notification Bell + Discreet Protected Admin Lock + Language Toggle + PWA Install */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {currentUser ? (
-            <div className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-emerald-900/15 bg-emerald-50/80 px-2.5 py-1 text-xs font-bold text-emerald-950">
-              <UserCircle2 className="h-3.5 w-3.5 text-emerald-700" />
-              <span className="max-w-[110px] truncate">{currentUser.full_name}</span>
+            <div className="inline-flex items-center gap-1 rounded-lg border border-emerald-900/15 bg-emerald-50/80 px-2 py-1 text-xs font-bold text-emerald-950">
+              <UserCircle2 className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
+              <span className="hidden sm:inline max-w-[100px] truncate">
+                {currentUser.full_name}
+              </span>
               <button
                 type="button"
                 onClick={onSignOutUser}
@@ -132,7 +138,8 @@ export function Header({
               variant="outline"
               size="sm"
               onClick={() => onOpenUserAuth('donor')}
-              className="border-emerald-900/20"
+              className="border-emerald-900/20 px-2 sm:px-3"
+              aria-label="Sign In"
             >
               <UserCircle2 className="h-3.5 w-3.5 text-emerald-700" />
               <span className="hidden sm:inline">Sign In</span>
@@ -153,7 +160,7 @@ export function Header({
             aria-label="Admin Portal Login"
             title="Restricted Admin Board (2FA Protected)"
             className={cn(
-              'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition-all',
+              'hidden sm:inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition-all',
               activeRole === 'admin'
                 ? 'border-emerald-900 bg-emerald-900 text-white shadow-sm'
                 : isAdminAuthenticated
@@ -166,14 +173,15 @@ export function Header({
             ) : (
               <Lock className="h-3.5 w-3.5 text-slate-500" />
             )}
-            <span className="hidden sm:inline">{t('roles.admin')}</span>
+            <span className="hidden md:inline">{t('roles.admin')}</span>
           </button>
+
           <Button
             variant="outline"
             size="sm"
             onClick={onToggleLanguage}
             aria-label="Toggle Language"
-            className="font-bold border-emerald-900/20"
+            className="font-bold border-emerald-900/20 px-2 sm:px-3"
           >
             <Globe className="h-3.5 w-3.5 text-emerald-700" />
             <span>{language === 'en' ? 'اردو' : 'EN'}</span>
@@ -189,6 +197,8 @@ export function Header({
               variant="gold"
               size="sm"
               onClick={onInstallPWA}
+              className="px-2 sm:px-3"
+              aria-label="Install App"
               title={canInstallPWA ? 'Install Amanat PWA' : 'Install or Add to Home Screen'}
             >
               <Download className="h-3.5 w-3.5" />
