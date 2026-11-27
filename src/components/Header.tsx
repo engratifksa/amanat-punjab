@@ -50,34 +50,34 @@ export function Header({
   return (
     <header className="sticky top-0 z-40 border-b border-emerald-900/10 bg-white/85 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-3 py-2.5 sm:px-6 sm:py-3">
-        {/* Brand Logo */}
+        {/* Brand Logo — never collapses or truncates */}
         <a
           href="#top"
           onClick={() => onChangeRole('donor')}
-          className="flex items-center gap-2 sm:gap-2.5 group min-w-0 shrink"
+          className="flex items-center gap-2 sm:gap-2.5 group shrink-0"
         >
           <AmanatLogo className="h-9 w-9 sm:h-10 sm:w-10 shrink-0 shadow-sm transition-transform duration-200 group-hover:scale-105" />
-          <div className="leading-tight min-w-0">
-            <div className="flex items-center gap-1 sm:gap-1.5">
-              <span className="text-base sm:text-lg font-extrabold tracking-tight text-emerald-950 truncate">
+          <div className="leading-tight shrink-0">
+            <div className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="text-base sm:text-lg font-extrabold tracking-tight text-emerald-950">
                 {t('appName')}
               </span>
-              <span className="text-xs sm:text-sm font-bold text-gold-600 shrink-0">
+              <span className="text-xs sm:text-sm font-bold text-gold-600">
                 {t('appNameUr')}
               </span>
             </div>
-            <div className="hidden xs:flex sm:flex items-center gap-1 text-[10px] font-semibold text-slate-500">
+            <div className="hidden sm:flex items-center gap-1 text-[10px] font-semibold text-slate-500 whitespace-nowrap">
               <ShieldCheck className="h-3 w-3 text-emerald-600 shrink-0" />
-              <span className="truncate">
+              <span>
                 {dataMode === 'supabase' ? 'Supabase Live' : 'Dexie Local PWA'}
               </span>
             </div>
           </div>
         </a>
 
-        {/* Desktop Section Links (shown in Donor view) */}
+        {/* Wide-Desktop Section Links (shown at 2xl so 1280px never crowds) */}
         {activeRole === 'donor' && (
-          <nav className="hidden xl:flex items-center gap-5 text-sm font-semibold text-slate-700">
+          <nav className="hidden 2xl:flex items-center gap-5 text-sm font-semibold text-slate-700 whitespace-nowrap shrink-0">
             <a href="#campaigns" className="hover:text-emerald-800 transition-colors">
               {t('nav.campaigns')}
             </a>
@@ -90,9 +90,9 @@ export function Header({
           </nav>
         )}
 
-        {/* Public Role Switcher Pill (Donor | Beneficiary | Field Verifier) */}
+        {/* Public Role Switcher Pill (Desktop >= 1024px; mobile & 768px tablet use bottom nav bar) */}
         <div
-          className="hidden md:flex items-center rounded-full bg-emerald-950/5 p-1 border border-emerald-900/10"
+          className="hidden lg:flex items-center rounded-full bg-emerald-950/5 p-1 border border-emerald-900/10 shrink-0"
           role="tablist"
           aria-label="Workspace Role Switcher"
         >
@@ -104,7 +104,7 @@ export function Header({
               aria-selected={activeRole === role}
               onClick={() => onChangeRole(role)}
               className={cn(
-                'rounded-full px-3 py-1.5 text-xs font-bold transition-all',
+                'rounded-full px-3 py-1.5 text-xs font-bold whitespace-nowrap transition-all',
                 activeRole === role
                   ? 'bg-emerald-900 text-white shadow-sm'
                   : 'text-slate-600 hover:text-emerald-900'
