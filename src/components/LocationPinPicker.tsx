@@ -190,9 +190,9 @@ export function LocationPinPicker({
         attributionControl: false,
       });
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
-        subdomains: 'abcd',
+        attribution: '© OpenStreetMap',
       }).addTo(map);
 
       const marker = L.marker([coords.lat, coords.lng], {
