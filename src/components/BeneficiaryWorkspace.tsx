@@ -348,9 +348,20 @@ export function BeneficiaryWorkspace({
               tehsil={tehsil}
               locationText={locationText}
               coords={coords}
-              onChange={({ locationText: lt, coords: c }) => {
+              onChange={({ locationText: lt, coords: c, detectedCity }) => {
                 setLocationText(lt);
                 setCoords(c);
+                if (detectedCity) {
+                  const matchedDist = Object.keys(PUNJAB_DISTRICTS).find(
+                    (d) =>
+                      detectedCity.toLowerCase().includes(d.toLowerCase()) ||
+                      d.toLowerCase().includes(detectedCity.toLowerCase())
+                  );
+                  if (matchedDist && matchedDist !== district) {
+                    setDistrict(matchedDist);
+                    setTehsil(PUNJAB_DISTRICTS[matchedDist][0]);
+                  }
+                }
               }}
               allowEdit
             />
