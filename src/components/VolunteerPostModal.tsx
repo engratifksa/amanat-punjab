@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X, Copy, Check, Download, Share2, ShieldAlert } from 'lucide-react';
 import type { WelfareCase } from '@/types/amanat';
 import { Badge, Button } from './ui/primitives';
+import { getPublicAppUrl } from '@/lib/utils';
 
 interface VolunteerPostModalProps {
   welfareCase: WelfareCase | null;
@@ -13,10 +14,7 @@ export function VolunteerPostModal({ welfareCase, onClose }: VolunteerPostModalP
 
   if (!welfareCase) return null;
 
-  const signupUrl =
-    typeof window !== 'undefined'
-      ? `${window.location.origin}/#volunteer`
-      : 'https://amanat.pk/#volunteer';
+  const signupUrl = `${getPublicAppUrl()}/#volunteer`;
 
   const postText = `🕌 VOLUNTEER FIELD VERIFIER NEEDED — ${welfareCase.tehsil.toUpperCase()}, ${welfareCase.district.toUpperCase()} (PUNJAB)
 

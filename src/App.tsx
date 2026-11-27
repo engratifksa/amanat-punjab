@@ -30,6 +30,7 @@ import { AdminAuthModal } from '@/components/AdminAuthModal';
 import { UserAuthModal, PENDING_OAUTH_KEY } from '@/components/UserAuthModal';
 import { DonorDashboard } from '@/components/DonorDashboard';
 import { VerifierQrScannerModal } from '@/components/VerifierQrScannerModal';
+import { ReceiptVerifyModal } from '@/components/ReceiptVerifyModal';
 import { SocialBar } from '@/components/SocialBar';
 import { MobileBottomNav } from '@/components/MobileBottomNav';
 
@@ -48,6 +49,10 @@ export default function App() {
   );
   const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
   const [showVerifierScanner, setShowVerifierScanner] = useState(false);
+  const [verifyQrHash, setVerifyQrHash] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('verify');
+  });
 
   const [currentUser, setCurrentUser] = useState<AuthUserSession | null>(() => {
     try {
@@ -515,6 +520,19 @@ export default function App() {
         isOpen={showVerifierScanner}
         profiles={profiles}
         onClose={() => setShowVerifierScanner(false)}
+      />
+
+      <ReceiptVerifyModal
+        qrHash={verifyQrHash}
+        donations={donations}
+        campaigns={campaigns}
+        cases={cases}
+        onClose={() => {
+          setVerifyQrHash(null);
+          if (window.location.search.includes('verify=')) {
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+        }}
       />
 
       <PaymentModal

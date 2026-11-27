@@ -28,6 +28,7 @@ import { Badge, Button, Card, Input, Select, Textarea } from './ui/primitives';
 import { DualProgressBar } from './DualProgressBar';
 import { LocationPinPicker, type GeoCoordinates } from './LocationPinPicker';
 import { SmartImageCapture } from './SmartImageCapture';
+import { TelegramGuideModal } from './TelegramGuideModal';
 
 interface BeneficiaryWorkspaceProps {
   currentUser: AuthUserSession | null;
@@ -102,6 +103,7 @@ export function BeneficiaryWorkspace({
   const [storyUr, setStoryUr] = useState('');
   const [recipientEmail, setRecipientEmail] = useState(currentUser?.email ?? '');
   const [recipientTelegramId, setRecipientTelegramId] = useState('');
+  const [showTelegramGuide, setShowTelegramGuide] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [justCreated, setJustCreated] = useState<string | null>(null);
 
@@ -437,9 +439,18 @@ export function BeneficiaryWorkspace({
             </div>
 
             <div className="rounded-2xl border border-emerald-900/10 bg-emerald-50/40 p-4 space-y-2.5">
-              <p className="text-xs font-extrabold text-emerald-950">
-                Private Step-by-Step Case Updates (Never Shown Publicly)
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-extrabold text-emerald-950">
+                  Private Step-by-Step Case Updates (Never Shown Publicly)
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowTelegramGuide(true)}
+                  className="text-xs font-extrabold text-sky-700 hover:text-sky-900 underline"
+                >
+                  How to get Telegram ID?
+                </button>
+              </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Input
                   type="email"
@@ -451,7 +462,7 @@ export function BeneficiaryWorkspace({
                   type="text"
                   value={recipientTelegramId}
                   onChange={(e) => setRecipientTelegramId(e.target.value)}
-                  placeholder="Private Telegram Chat ID (optional)"
+                  placeholder="Private Telegram Chat ID (e.g. 987654321)"
                 />
               </div>
             </div>
@@ -518,6 +529,10 @@ export function BeneficiaryWorkspace({
           })}
         </div>
       </div>
+      <TelegramGuideModal
+        isOpen={showTelegramGuide}
+        onClose={() => setShowTelegramGuide(false)}
+      />
     </div>
   );
 }

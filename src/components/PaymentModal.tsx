@@ -20,10 +20,11 @@ import type {
   PaymentChannel,
 } from '@/types/amanat';
 import { ESCROW_PAYMENT_CHANNELS, makeInvoiceDataUrl } from '@/lib/seedData';
-import { formatPKR, cn } from '@/lib/utils';
+import { formatPKR, getPublicAppUrl, cn } from '@/lib/utils';
 import { downloadAmanatCertificatePDF } from '@/lib/pdfReceipt';
 import { Badge, Button, Input } from './ui/primitives';
 import { SmartImageCapture } from './SmartImageCapture';
+import { TelegramGuideModal } from './TelegramGuideModal';
 
 interface PaymentModalProps {
   target: DonationTarget | null;
@@ -69,6 +70,7 @@ export function PaymentModal({
   const [txRef, setTxRef] = useState<string>('');
   const [donorEmail, setDonorEmail] = useState<string>(defaultDonorEmail);
   const [donorTelegramId, setDonorTelegramId] = useState<string>('');
+  const [showTelegramGuide, setShowTelegramGuide] = useState(false);
   const [proofUrl, setProofUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -314,9 +316,18 @@ export function PaymentModal({
 
                 {/* Optional 3-Channel Milestone Notification Opt-In */}
                 <div className="rounded-xl border border-emerald-900/10 bg-emerald-50/40 p-3.5 space-y-2.5">
-                  <p className="text-[11px] font-extrabold text-emerald-950">
-                    Receive 25% / 50% / 75% / 100% Milestone &amp; Paid Vendor Receipt Updates (Optional)
-                  </p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] font-extrabold text-emerald-950">
+                      Receive 25% / 50% / 75% / 100% Milestone &amp; Paid Vendor Receipt Updates (Optional)
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowTelegramGuide(true)}
+                      className="text-[11px] font-extrabold text-sky-700 hover:text-sky-900 underline"
+                    >
+                      How to get Telegram ID?
+                    </button>
+                  </div>
                   <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                     <Input
                       type="email"
@@ -328,7 +339,7 @@ export function PaymentModal({
                       type="text"
                       value={donorTelegramId}
                       onChange={(e) => setDonorTelegramId(e.target.value)}
-                      placeholder="Telegram Chat ID (optional)"
+                      placeholder="Telegram Chat ID (e.g. 987654321)"
                     />
                   </div>
                 </div>
@@ -412,7 +423,7 @@ export function PaymentModal({
                   className="rounded-2xl bg-white p-3 shadow-sm border border-slate-200 shrink-0"
                 >
                   <QRCodeCanvas
-                    value={`https://amanat.pk/verify/${activeDonation.receipt_qr_hash}?ref=${activeDonation.transaction_ref}&pkr=${activeDonation.amount_pkr}`}
+                    value={`${getPublicAppUrl()}/?verify=${activeDonation.receipt_qr_hash}&ref=${encodeURIComponent(activeDonation.transaction_ref)}&pkr=${activeDonation.amount_pkr}`}
                     size={126}
                     fgColor="#064E3B"
                     level="M"
@@ -450,6 +461,11 @@ export function PaymentModal({
           )}
         </div>
       </div>
+
+      <TelegramGuideModal
+        isOpen={showTelegramGuide}
+        onClose={() => setShowTelegramGuide(false)}
+      />
     </div>
   );
 }

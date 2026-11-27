@@ -24,6 +24,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { VolunteerPostModal } from './VolunteerPostModal';
+import { TelegramGuideModal } from './TelegramGuideModal';
 import {
   exportAllCampaignsCsv,
   exportFullAuditLedgerCsv,
@@ -129,6 +130,7 @@ export function AdminWorkspace({
   const [savingSettings, setSavingSettings] = useState(false);
   const [testingTelegram, setTestingTelegram] = useState(false);
   const [volunteerPostCase, setVolunteerPostCase] = useState<WelfareCase | null>(null);
+  const [showTelegramGuide, setShowTelegramGuide] = useState(false);
   const [flushConfirmText, setFlushConfirmText] = useState('');
   const [flushing, setFlushing] = useState(false);
 
@@ -955,7 +957,7 @@ export function AdminWorkspace({
                         social_links: { ...s.social_links, email: e.target.value },
                       }))
                     }
-                    placeholder="trust@amanat.pk"
+                    placeholder="support.amanat@gmail.com"
                   />
                 </div>
                 <div className="sm:col-span-2">
@@ -982,16 +984,26 @@ export function AdminWorkspace({
                     <Send className="h-4 w-4 text-sky-600" />
                     Telegram 2FA OTP Bot Setup (Gate 2)
                   </h3>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleTestTelegram}
-                    disabled={testingTelegram}
-                  >
-                    <Send className="h-3.5 w-3.5" />
-                    {testingTelegram ? 'Sending...' : 'Send Test OTP'}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowTelegramGuide(true)}
+                    >
+                      Guide
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleTestTelegram}
+                      disabled={testingTelegram}
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      {testingTelegram ? 'Sending...' : 'Send Test OTP'}
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1275,6 +1287,11 @@ export function AdminWorkspace({
       <VolunteerPostModal
         welfareCase={volunteerPostCase}
         onClose={() => setVolunteerPostCase(null)}
+      />
+
+      <TelegramGuideModal
+        isOpen={showTelegramGuide}
+        onClose={() => setShowTelegramGuide(false)}
       />
     </div>
   );
