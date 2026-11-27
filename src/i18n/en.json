@@ -1,0 +1,175 @@
+{
+  "appName": "Amanat",
+  "appNameUr": "امانت",
+  "tagline": "Sacred Trust. Direct Impact.",
+  "nav": {
+    "campaigns": "Crowdfunding",
+    "cases": "Verified Cases",
+    "pipeline": "Escrow Flow",
+    "install": "Install App",
+    "installed": "Installed",
+    "demoRole": "Workspace"
+  },
+  "roles": {
+    "donor": "Donor",
+    "beneficiary": "Beneficiary",
+    "verifier": "Field Verifier",
+    "admin": "Admin Board"
+  },
+  "hero": {
+    "badge": "0% Admin Fee · 100% Direct Vendor Escrow · Punjab, Pakistan",
+    "headline": "Sacred Trust. Direct Impact for Families in Punjab.",
+    "subcopy": "Every Zakat and Sadaqah rupee goes directly to verified hospitals, pharmacies, schools, ration depots, and wedding essentials vendors—never raw cash, always backed by field visits and QR-verifiable receipts.",
+    "ctaExplore": "Explore Verified Cases",
+    "ctaRequest": "Request Assistance",
+    "webglFallback": "Lite 3D Mode (Data Saver / Low-GPU)",
+    "nodes": {
+      "daughter_marriage": "Marriage",
+      "health": "Health",
+      "education": "Education",
+      "ration_food": "Ration"
+    }
+  },
+  "stats": {
+    "totalAid": "Total Verified Aid (PKR)",
+    "directVendor": "Direct Vendor Payouts",
+    "verifiers": "Accredited Field Verifiers",
+    "adminFee": "Platform / Admin Fee"
+  },
+  "campaigns": {
+    "badge": "Multi-Campaign Crowdfunding",
+    "title": "Active Collective Crowdfunding Drives",
+    "subtitle": "Pool Zakat and Sadaqah across high-impact district drives with live Target vs. Collected tracking and named vendor escrow.",
+    "target": "Target",
+    "collected": "Confirmed",
+    "pledged": "Pending Pledge",
+    "donors": "donors",
+    "daysLeft": "days left",
+    "ended": "Target Reached",
+    "escrowVendor": "Escrow Vendor",
+    "contribute": "Contribute to Drive",
+    "fullyFunded": "Fully Funded (Locked)",
+    "disbursed": "Disbursed to Vendor"
+  },
+  "cases": {
+    "badge": "Zero-Exposure Dignity Feed",
+    "title": "Field-Verified Individual Cases",
+    "subtitle": "Only cases inspected on the ground by Accredited Field Verifiers and approved by the Verification Board appear here. No personal names or CNICs are ever exposed.",
+    "filters": {
+      "all": "All",
+      "zakat_eligible": "Zakat Eligible",
+      "daughter_marriage": "Daughter's Marriage",
+      "health": "Health",
+      "education": "Education",
+      "ration_food": "Food/Ration",
+      "clothing": "Clothing"
+    },
+    "verifiedBy": "Field Verified",
+    "donateTrack": "Donate & Track Escrow",
+    "paidToVendor": "Paid to Vendor"
+  },
+  "categories": {
+    "daughter_marriage": "Daughter's Marriage",
+    "health": "Health & Medical",
+    "education": "Education",
+    "ration_food": "Food / Ration",
+    "clothing": "Clothing",
+    "emergency_relief": "Emergency Relief"
+  },
+  "funding": {
+    "zakat_eligible": "Zakat Eligible",
+    "sadaqah_general": "Sadaqah / General"
+  },
+  "pipeline": {
+    "badge": "Tamper-Proof Accountability",
+    "title": "5-Stage Direct Vendor Escrow Pipeline",
+    "subtitle": "How Amanat guarantees zero leakage from your pocket to a deserving household's vendor invoice.",
+    "stages": [
+      {
+        "title": "Field Visit",
+        "desc": "Accredited local verifier visits household in Punjab & uploads GPS/Tehsil evidence offline."
+      },
+      {
+        "title": "Board Audit",
+        "desc": "Shariah & Verification Board audits vendor pro-forma invoice and anonymizes family identity."
+      },
+      {
+        "title": "Donor Escrow",
+        "desc": "Donors transfer via zero-fee Raast, JazzCash, EasyPaisa, or Meezan IBAN and upload slip."
+      },
+      {
+        "title": "Direct Vendor Payout",
+        "desc": "Confirmed funds are paid strictly to the hospital, school, ration depot, or wedding vendor."
+      },
+      {
+        "title": "Paid Receipt & QR Certificate",
+        "desc": "Signed vendor receipt closes the loop and unlocks a downloadable QR PDF Amanat Certificate."
+      }
+    ]
+  },
+  "payment": {
+    "title": "Direct Escrow Contribution",
+    "subtitle": "Zero-fee transfer directly to Amanat Vendor Escrow",
+    "proForma": "Verified Vendor Pro-Forma Invoice",
+    "copy": "Copy",
+    "copied": "Copied",
+    "amountLabel": "Contribution Amount (PKR)",
+    "channelLabel": "Zero-Cost Payment Channel",
+    "refLabel": "Transaction Reference / TID",
+    "proofLabel": "Payment Slip Screenshot (Auto-Compressed)",
+    "submit": "Submit Pledge & Generate Tracker",
+    "successTitle": "JazakAllah Khair! Pledge Recorded",
+    "successSub": "Your pledge is live on the card's gold pending bar and queued for instant Board verification.",
+    "downloadCert": "Download QR & PDF Amanat Certificate",
+    "trackerTitle": "End-to-End 5-Stage Fund Tracker"
+  },
+  "beneficiary": {
+    "title": "Request Dignified Assistance",
+    "subtitle": "Your personal identity is kept strictly confidential and never shown publicly. All support is settled directly with your named hospital, school, or vendor.",
+    "selectCategory": "Select Assistance Category",
+    "district": "District (Punjab)",
+    "tehsil": "Tehsil",
+    "vendorName": "Hospital / School / Vendor Name",
+    "vendorType": "Vendor Type (e.g. Hospital, Ration Store)",
+    "amount": "Estimated Invoice Amount (PKR)",
+    "storyEn": "Situation Summary (English)",
+    "storyUr": "حالات کا خلاصہ (اردو - اختیاری)",
+    "submit": "Submit Confidential Request",
+    "trackerTitle": "My Applications & Live Payout Tracker"
+  },
+  "verifier": {
+    "title": "Field Verifier Offline-First Workspace",
+    "subtitle": "Inspect assigned rural Punjab households even without mobile data. Evidence is compressed and stored in IndexedDB for 1-tap sync.",
+    "offlineReady": "Offline Ready (IndexedDB)",
+    "simulateOffline": "Simulate Rural Offline",
+    "onlineMode": "Online Connected",
+    "syncNow": "Sync Queued Reports",
+    "pendingQueue": "Assigned Cases Awaiting Field Visit",
+    "visitNotes": "Ground Inspection Notes",
+    "householdMembers": "Household Members",
+    "monthlyIncome": "Monthly Household Income (PKR)",
+    "gpsTag": "Tehsil / GPS Location Tag",
+    "attachPhotos": "Attach Compressed CNIC / Vendor Invoice Photo",
+    "submitReport": "Save & Verify Household"
+  },
+  "admin": {
+    "title": "Verification & Crowdfunding Board",
+    "subtitle": "Manage simultaneous crowdfunding drives, accredit field verifiers, confirm donor references, and upload final paid vendor receipts.",
+    "tabCrowdfunding": "Crowdfunding Manager",
+    "tabAudit": "Case & Payment Audit",
+    "tabSettings": "Settings, Socials & Escrow",
+    "createDrive": "Launch New Crowdfunding Drive",
+    "publishDrive": "Publish Crowdfunding Drive",
+    "pendingDonations": "Pending Donor Transaction References",
+    "confirmPayment": "Confirm Receipt",
+    "pendingCases": "Field-Verified Cases Awaiting Publication",
+    "approvePublish": "Approve & Publish Case",
+    "verifiersList": "Field Verifier Accreditation",
+    "accredit": "Accredit Verifier",
+    "revoke": "Revoke",
+    "uploadPaidReceipt": "Upload Paid Vendor Receipt"
+  },
+  "footer": {
+    "zeroCost": "Built on 100% zero-cost open-source & free-tier architecture · No platform fees · Punjab, Pakistan"
+  }
+}
