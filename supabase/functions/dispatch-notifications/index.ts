@@ -1,7 +1,9 @@
 // Supabase Edge Function (Deno) — Zero-Cost 3-Channel Notification Dispatcher
-// Sends clean transactional emails via Gmail SMTP (support.amanat@gmail.com + free Google App Password)
-// with individual To: headers + plain-text fallback to maximize Primary Inbox placement,
-// and rich Telegram cards via free Telegram Bot API.
+// Primary Email: Resend Free Tier (notifications@amanatpunjab.org, Reply-To: support@amanatpunjab.org)
+//                with SPF + DKIM + DMARC alignment for Primary Inbox placement.
+// Automatic Fallback: Gmail SMTP (support.amanat@gmail.com) if Resend is unconfigured,
+//                     domain is still verifying, or daily free quota (100/day) is reached.
+// Telegram: Rich HTML cards via free Telegram Bot API.
 
 import nodemailer from 'npm:nodemailer@6.9.16';
 
@@ -42,12 +44,21 @@ Deno.serve(async (req: Request) => {
 
   try {
     const payload = (await req.json()) as DispatchPayload;
-    const gmailUser = Deno.env.get('GMAIL_USER') ?? payload.senderEmail ?? 'support.amanat@gmail.com';
+    const resendApiKey = (Deno.env.get('RESEND_API_KEY') ?? '').trim();
+    const resendFrom =
+      (Deno.env.get('RESEND_FROM_EMAIL') ?? '').trim() ||
+      'Amanat Direct Welfare <notifications@amanatpunjab.org>';
+    const resendReplyTo =
+      (Deno.env.get('RESEND_REPLY_TO') ?? '').trim() || 'support@amanatpunjab.org';
+
+    const gmailUser =
+      Deno.env.get('GMAIL_USER') ?? payload.senderEmail ?? 'support.amanat@gmail.com';
     const gmailAppPassword = Deno.env.get('GMAIL_APP_PASSWORD') ?? '';
     const botToken = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? '';
 
     const results = {
       email: 'skipped' as 'delivered' | 'failed' | 'skipped',
+      emailProvider: 'none' as 'resend' | 'gmail' | 'mixed' | 'none',
       telegram: 'skipped' as 'delivered' | 'failed' | 'skipped',
       emailCount: 0,
       telegramCount: 0,
@@ -61,49 +72,100 @@ Deno.serve(async (req: Request) => {
       )
     );
 
-    // 1. Dispatch Transactional Emails via Gmail SMTP with proper `to:` + `text:` + `html:`
-    if (gmailAppPassword && uniqueRecipients.length > 0) {
-      try {
-        const transporter = nodemailer.createTransport({
-          host: 'smtp.gmail.com',
-          port: 465,
-          secure: true,
-          auth: {
-            user: gmailUser,
-            pass: gmailAppPassword,
-          },
-        });
+    // 1. Dispatch Transactional Emails (Resend Primary → Gmail SMTP Automatic Fallback)
+    if (uniqueRecipients.length > 0 && (resendApiKey || gmailAppPassword)) {
+      const plainText =
+        payload.emailText?.trim() || stripHtmlToPlainText(payload.emailHtml);
 
-        const plainText =
-          payload.emailText?.trim() || stripHtmlToPlainText(payload.emailHtml);
+      let resendSent = 0;
+      let gmailSent = 0;
+      const fallbackRecipients: string[] = [];
 
-        // Send individual emails with explicit `to:` header (empty To + Bcc-only triggers Gmail Spam!)
-        let sentCount = 0;
+      if (resendApiKey) {
         for (const toAddr of uniqueRecipients) {
           try {
-            await transporter.sendMail({
-              from: `"Amanat Direct Welfare" <${gmailUser}>`,
-              to: toAddr,
-              replyTo: gmailUser,
-              subject: payload.emailSubject,
-              text: plainText,
-              html: payload.emailHtml,
+            const res = await fetch('https://api.resend.com/emails', {
+              method: 'POST',
               headers: {
-                'X-Auto-Response-Suppress': 'All',
+                Authorization: `Bearer ${resendApiKey}`,
+                'Content-Type': 'application/json',
               },
+              body: JSON.stringify({
+                from: resendFrom,
+                to: [toAddr],
+                reply_to: resendReplyTo,
+                subject: payload.emailSubject,
+                text: plainText,
+                html: payload.emailHtml,
+                headers: {
+                  'X-Auto-Response-Suppress': 'All',
+                },
+              }),
             });
-            sentCount += 1;
+
+            if (res.ok) {
+              resendSent += 1;
+            } else {
+              const errBody = await res.text();
+              console.warn(`Resend failed for ${toAddr} (${res.status}), falling back to Gmail SMTP:`, errBody);
+              fallbackRecipients.push(toAddr);
+            }
           } catch (singleErr) {
-            console.error(`Gmail SMTP error for ${toAddr}:`, singleErr);
+            console.warn(`Resend network error for ${toAddr}, falling back to Gmail SMTP:`, singleErr);
+            fallbackRecipients.push(toAddr);
           }
         }
-
-        results.email = sentCount > 0 ? 'delivered' : 'failed';
-        results.emailCount = sentCount;
-      } catch (err) {
-        console.error('Gmail SMTP transport error:', err);
-        results.email = 'failed';
+      } else {
+        fallbackRecipients.push(...uniqueRecipients);
       }
+
+      // Automatic Gmail SMTP fallback for any unsent recipients (zero lost emails)
+      if (fallbackRecipients.length > 0 && gmailAppPassword) {
+        try {
+          const transporter = nodemailer.createTransport({
+            host: 'smtp.gmail.com',
+            port: 465,
+            secure: true,
+            auth: {
+              user: gmailUser,
+              pass: gmailAppPassword,
+            },
+          });
+
+          for (const toAddr of fallbackRecipients) {
+            try {
+              await transporter.sendMail({
+                from: `"Amanat Direct Welfare" <${gmailUser}>`,
+                to: toAddr,
+                replyTo: resendReplyTo || gmailUser,
+                subject: payload.emailSubject,
+                text: plainText,
+                html: payload.emailHtml,
+                headers: {
+                  'X-Auto-Response-Suppress': 'All',
+                },
+              });
+              gmailSent += 1;
+            } catch (singleErr) {
+              console.error(`Gmail SMTP error for ${toAddr}:`, singleErr);
+            }
+          }
+        } catch (err) {
+          console.error('Gmail SMTP transport error:', err);
+        }
+      }
+
+      const totalSent = resendSent + gmailSent;
+      results.emailCount = totalSent;
+      results.email = totalSent > 0 ? 'delivered' : 'failed';
+      results.emailProvider =
+        resendSent > 0 && gmailSent > 0
+          ? 'mixed'
+          : resendSent > 0
+            ? 'resend'
+            : gmailSent > 0
+              ? 'gmail'
+              : 'none';
     }
 
     // 2. Dispatch Rich Telegram Card via Free Telegram Bot API
