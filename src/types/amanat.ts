@@ -30,7 +30,8 @@ export type CaseStatus =
   | 'field_verified'
   | 'approved'
   | 'funded'
-  | 'disbursed_to_vendor';
+  | 'disbursed_to_vendor'
+  | 'rejected';
 
 export type PaymentChannel =
   | 'raast'
@@ -42,7 +43,8 @@ export type PaymentChannel =
 export type DonationStatus =
   | 'pledged_pending_verify'
   | 'confirmed'
-  | 'paid_to_vendor';
+  | 'paid_to_vendor'
+  | 'rejected';
 
 export interface Profile {
   id: string;
@@ -110,6 +112,7 @@ export interface WelfareCase {
   beneficiary_lng?: number | null;
   beneficiary_address_note?: string;
   beneficiary_account_email?: string;
+  rejection_reason?: string | null;
 }
 
 export interface FieldVerification {
@@ -142,6 +145,7 @@ export interface Donation {
   receipt_qr_hash: string;
   created_at: string;
   donor_note?: string;
+  rejection_reason?: string | null;
 }
 
 export interface AuthUserSession {

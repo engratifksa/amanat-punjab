@@ -457,8 +457,16 @@ export default function App() {
               await dataClient.confirmDonation(donationId);
               await refreshData();
             }}
+            onUpdateDonationStatus={async (donationId, status, reason) => {
+              await dataClient.updateDonationStatus(donationId, status, reason);
+              await refreshData();
+            }}
             onApproveCase={async (caseId) => {
               await dataClient.approveCase(caseId);
+              await refreshData();
+            }}
+            onUpdateCaseStatus={async (caseId, status, reason) => {
+              await dataClient.updateCaseStatus(caseId, status, reason);
               await refreshData();
             }}
             onAssignVerifier={async (caseId, verifierId) => {

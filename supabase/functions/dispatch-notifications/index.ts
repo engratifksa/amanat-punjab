@@ -1,11 +1,7 @@
 // Supabase Edge Function (Deno) — Zero-Cost 3-Channel Notification Dispatcher
-// Sends branded HTML emails via Gmail SMTP (support.amanat@gmail.com + free Google App Password)
+// Sends clean transactional emails via Gmail SMTP (support.amanat@gmail.com + free Google App Password)
+// with individual To: headers + plain-text fallback to maximize Primary Inbox placement,
 // and rich Telegram cards via free Telegram Bot API.
-//
-// Deploy: supabase functions deploy dispatch-notifications
-// Secrets:
-//   supabase secrets set GMAIL_USER=support.amanat@gmail.com GMAIL_APP_PASSWORD=<16-char-app-password>
-//   supabase secrets set TELEGRAM_BOT_TOKEN=<bot-token>
 
 import nodemailer from 'npm:nodemailer@6.9.16';
 
@@ -19,8 +15,24 @@ interface DispatchPayload {
   recipientEmails: string[];
   emailSubject: string;
   emailHtml: string;
+  emailText?: string;
   recipientTelegramIds: string[];
   telegramText: string;
+}
+
+function stripHtmlToPlainText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|h1|h2|h3|tr|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 Deno.serve(async (req: Request) => {
@@ -41,8 +53,16 @@ Deno.serve(async (req: Request) => {
       telegramCount: 0,
     };
 
-    // 1. Dispatch Branded HTML Email via Gmail SMTP (Free up to 500/day)
-    if (gmailAppPassword && payload.recipientEmails.length > 0) {
+    const uniqueRecipients = Array.from(
+      new Set(
+        (payload.recipientEmails ?? [])
+          .map((e) => e.trim().toLowerCase())
+          .filter((e) => e.includes('@'))
+      )
+    );
+
+    // 1. Dispatch Transactional Emails via Gmail SMTP with proper `to:` + `text:` + `html:`
+    if (gmailAppPassword && uniqueRecipients.length > 0) {
       try {
         const transporter = nodemailer.createTransport({
           host: 'smtp.gmail.com',
@@ -54,18 +74,34 @@ Deno.serve(async (req: Request) => {
           },
         });
 
-        await transporter.sendMail({
-          from: `"Amanat — Sacred Trust (امانت)" <${gmailUser}>`,
-          bcc: payload.recipientEmails.join(', '),
-          replyTo: gmailUser,
-          subject: payload.emailSubject,
-          html: payload.emailHtml,
-        });
+        const plainText =
+          payload.emailText?.trim() || stripHtmlToPlainText(payload.emailHtml);
 
-        results.email = 'delivered';
-        results.emailCount = payload.recipientEmails.length;
+        // Send individual emails with explicit `to:` header (empty To + Bcc-only triggers Gmail Spam!)
+        let sentCount = 0;
+        for (const toAddr of uniqueRecipients) {
+          try {
+            await transporter.sendMail({
+              from: `"Amanat Direct Welfare" <${gmailUser}>`,
+              to: toAddr,
+              replyTo: gmailUser,
+              subject: payload.emailSubject,
+              text: plainText,
+              html: payload.emailHtml,
+              headers: {
+                'X-Auto-Response-Suppress': 'All',
+              },
+            });
+            sentCount += 1;
+          } catch (singleErr) {
+            console.error(`Gmail SMTP error for ${toAddr}:`, singleErr);
+          }
+        }
+
+        results.email = sentCount > 0 ? 'delivered' : 'failed';
+        results.emailCount = sentCount;
       } catch (err) {
-        console.error('Gmail SMTP error:', err);
+        console.error('Gmail SMTP transport error:', err);
         results.email = 'failed';
       }
     }

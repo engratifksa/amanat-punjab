@@ -106,15 +106,29 @@ export function BeneficiaryWorkspace({
   const [showTelegramGuide, setShowTelegramGuide] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [justCreated, setJustCreated] = useState<string | null>(null);
+  const [myCaseFilter, setMyCaseFilter] = useState<
+    'all' | 'zakat_eligible' | CaseCategory
+  >('all');
 
   // Any signed-in Google/Email user has instant access (never asks to sign in again!)
   const isBeneficiarySignedIn = Boolean(currentUser);
 
-  const myCases = cases.filter(
-    (c) =>
-      c.beneficiary_id === 'prof-ben-1' ||
-      (currentUser?.email && c.beneficiary_account_email === currentUser.email)
-  );
+  // Strict privacy: show ONLY applications belonging to the currently signed-in beneficiary
+  const myCases = cases.filter((c) => {
+    if (!currentUser) return false;
+    const userEmail = currentUser.email.trim().toLowerCase();
+    const caseEmail = c.beneficiary_account_email?.trim().toLowerCase() ?? '';
+    return (
+      (Boolean(caseEmail) && caseEmail === userEmail) ||
+      (Boolean(currentUser.profile_id) && c.beneficiary_id === currentUser.profile_id)
+    );
+  });
+
+  const filteredMyCases = myCases.filter((c) => {
+    if (myCaseFilter === 'all') return true;
+    if (myCaseFilter === 'zakat_eligible') return c.funding_type === 'zakat_eligible';
+    return c.category === myCaseFilter;
+  });
 
   const handleDistrictChange = (dist: string) => {
     setDistrict(dist);
@@ -217,12 +231,20 @@ export function BeneficiaryWorkspace({
         {/* Dignified Application Form */}
         <Card className="lg:col-span-7 p-6 space-y-5">
           {justCreated && (
-            <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 flex items-center gap-3 text-sm font-semibold text-emerald-900">
-              <CheckCircle2 className="h-5 w-5 text-emerald-700 shrink-0" />
-              <span>
-                Confidential request logged as <strong>{justCreated}</strong> and routed to the
-                Verification Board for area Field Verifier assignment.
-              </span>
+            <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 space-y-2 text-sm font-semibold text-emerald-900">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="h-5 w-5 text-emerald-700 shrink-0" />
+                <span>
+                  Confidential request logged as <strong>{justCreated}</strong> and routed to the
+                  Verification Board for area Field Verifier assignment.
+                </span>
+              </div>
+              <p className="text-[11px] font-medium text-emerald-800 bg-white/80 rounded-xl px-3 py-2 border border-emerald-200/70">
+                <strong>Inbox Tip (ای میل ہدایت):</strong> Check your Inbox (or Spam folder once)
+                for <span className="font-mono font-bold">support.amanat@gmail.com</span> and tap{' '}
+                <strong>&ldquo;Not Spam&rdquo;</strong> so Field Verifier visit alerts &amp; QR
+                safety instructions land directly in your Primary Inbox.
+              </p>
             </div>
           )}
 
@@ -481,52 +503,110 @@ export function BeneficiaryWorkspace({
 
         {/* Live Application & Payout Tracker */}
         <div className="lg:col-span-5 space-y-4">
-          <h2 className="text-lg font-extrabold text-emerald-950">
-            {t('beneficiary.trackerTitle')}
-          </h2>
-          {myCases.map((c) => {
-            const verifier = profiles.find((p) => p.id === c.assigned_verifier_id);
-            return (
-              <Card key={c.id} className="p-5 space-y-3.5">
-                <BeneficiaryDigitalCard
-                  welfareCase={c}
-                  assignedVerifierName={verifier?.full_name}
-                />
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs font-extrabold text-emerald-900 bg-emerald-100 px-2.5 py-1 rounded-lg">
-                    {c.case_code}
-                  </span>
-                  <Badge variant={c.status === 'approved' ? 'emerald' : 'gold'}>
-                    {c.status.replace(/_/g, ' ').toUpperCase()}
-                  </Badge>
-                </div>
-                <p className="text-xs text-slate-700 leading-relaxed">
-                  {c.anonymized_story_en}
-                </p>
-                <div className="space-y-1 text-xs text-slate-600">
-                  <p className="flex items-center gap-1.5">
-                    <MapPin className="h-3.5 w-3.5 text-emerald-700" />
-                    {c.district} · {c.tehsil}
-                  </p>
-                  <p className="flex items-center gap-1.5">
-                    <Building2 className="h-3.5 w-3.5 text-emerald-700" />
-                    Vendor: <strong>{c.vendor_name}</strong> ({formatPKR(c.target_amount_pkr)})
-                  </p>
-                  {verifier && (
-                    <p className="text-teal-800 font-semibold">
-                      Assigned Verifier: {verifier.full_name} ({verifier.district})
-                    </p>
+          <div className="space-y-2.5">
+            <h2 className="text-lg font-extrabold text-emerald-950">
+              {t('beneficiary.trackerTitle')} ({myCases.length})
+            </h2>
+            <div className="flex flex-wrap gap-1.5">
+              {(
+                [
+                  { id: 'all', label: t('cases.filters.all') },
+                  { id: 'zakat_eligible', label: t('cases.filters.zakat_eligible') },
+                  { id: 'daughter_marriage', label: t('cases.filters.daughter_marriage') },
+                  { id: 'health', label: t('cases.filters.health') },
+                  { id: 'education', label: t('cases.filters.education') },
+                  { id: 'ration_food', label: t('cases.filters.ration_food') },
+                  { id: 'clothing', label: t('cases.filters.clothing') },
+                ] as const
+              ).map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setMyCaseFilter(f.id)}
+                  className={cn(
+                    'rounded-full px-3 py-1 text-[11px] font-bold transition-all border',
+                    myCaseFilter === f.id
+                      ? 'bg-emerald-900 text-white border-emerald-900 shadow-sm'
+                      : 'bg-white text-slate-700 border-emerald-900/15 hover:bg-emerald-50'
                   )}
-                </div>
-                <DualProgressBar
-                  target={c.target_amount_pkr}
-                  collected={c.raised_amount_pkr}
-                  pledged={c.pledged_amount_pkr}
-                  compact
-                />
-              </Card>
-            );
-          })}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredMyCases.length === 0 ? (
+            <Card className="p-6 text-center space-y-2 border-dashed border-emerald-900/20">
+              <p className="text-sm font-extrabold text-emerald-950">
+                {myCases.length === 0
+                  ? 'No applications submitted under your account yet'
+                  : 'No applications match this category filter'}
+              </p>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {myCases.length === 0
+                  ? 'For your privacy, only applications submitted from your signed-in account appear here. Submit the form on the left to track your case live.'
+                  : 'Switch to "All" to view all of your submitted requests.'}
+              </p>
+            </Card>
+          ) : (
+            filteredMyCases.map((c) => {
+              const verifier = profiles.find((p) => p.id === c.assigned_verifier_id);
+              return (
+                <Card key={c.id} className="p-5 space-y-3.5">
+                  <BeneficiaryDigitalCard
+                    welfareCase={c}
+                    assignedVerifierName={verifier?.full_name}
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-xs font-extrabold text-emerald-900 bg-emerald-100 px-2.5 py-1 rounded-lg">
+                      {c.case_code}
+                    </span>
+                    <Badge
+                      variant={
+                        c.status === 'approved' || c.status === 'disbursed_to_vendor'
+                          ? 'emerald'
+                          : c.status === 'rejected'
+                          ? 'rose'
+                          : 'gold'
+                      }
+                    >
+                      {c.status.replace(/_/g, ' ').toUpperCase()}
+                    </Badge>
+                  </div>
+                  {c.status === 'rejected' && c.rejection_reason && (
+                    <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900">
+                      <strong>Board Note:</strong> {c.rejection_reason}
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-700 leading-relaxed">
+                    {c.anonymized_story_en}
+                  </p>
+                  <div className="space-y-1 text-xs text-slate-600">
+                    <p className="flex items-center gap-1.5">
+                      <MapPin className="h-3.5 w-3.5 text-emerald-700" />
+                      {c.district} · {c.tehsil}
+                    </p>
+                    <p className="flex items-center gap-1.5">
+                      <Building2 className="h-3.5 w-3.5 text-emerald-700" />
+                      Vendor: <strong>{c.vendor_name}</strong> ({formatPKR(c.target_amount_pkr)})
+                    </p>
+                    {verifier && (
+                      <p className="text-teal-800 font-semibold">
+                        Assigned Verifier: {verifier.full_name} ({verifier.district})
+                      </p>
+                    )}
+                  </div>
+                  <DualProgressBar
+                    target={c.target_amount_pkr}
+                    collected={c.raised_amount_pkr}
+                    pledged={c.pledged_amount_pkr}
+                    compact
+                  />
+                </Card>
+              );
+            })
+          )}
         </div>
       </div>
       <TelegramGuideModal

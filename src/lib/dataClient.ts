@@ -1081,37 +1081,69 @@ export const dataClient = {
   },
 
   async approveCase(caseId: string): Promise<void> {
+    await this.updateCaseStatus(caseId, 'approved');
+  },
+
+  async updateCaseStatus(
+    caseId: string,
+    status: WelfareCase['status'],
+    rejectionReason?: string
+  ): Promise<void> {
     await ensureLocalSeeded();
+    const cleanReason = status === 'rejected' ? rejectionReason?.trim() || null : null;
     if (supabase) {
-      const { error } = await supabase.from('cases').update({ status: 'approved' }).eq('id', caseId);
+      const { error } = await supabase
+        .from('cases')
+        .update({ status, rejection_reason: cleanReason })
+        .eq('id', caseId);
       if (error) throw error;
       const { data: c } = await supabase.from('cases').select('*').eq('id', caseId).maybeSingle();
       if (c) {
         const wc = c as WelfareCase;
-        await emitNotification(
-          {
-            event_type: 'case_approved_live',
-            audience: 'beneficiary',
-            target_code: wc.case_code,
-            case_id: wc.id,
-            campaign_id: null,
-            title_en: `Case Approved & Live for Funding (${wc.case_code})`,
-            title_ur: `آپ کا کیس منظور ہو کر فنڈنگ کے لیے لائیو ہو گیا (${wc.case_code})`,
-            body_en: `Alhamdulillah! After ground verification, your request (${wc.case_code}) for PKR ${wc.target_amount_pkr.toLocaleString('en-PK')} via ${wc.vendor_name} is now LIVE on Amanat with 100% privacy protection.`,
-            body_ur: `الحمدللہ! فیلڈ تصدیق کے بعد آپ کی درخواست (${wc.case_code}) مکمل رازداری کے ساتھ امانت پر فنڈنگ کے لیے لائیو کر دی گئی ہے۔`,
-            vendor_name: wc.vendor_name,
-            district: wc.district,
-            collected_pkr: wc.raised_amount_pkr,
-            target_pkr: wc.target_amount_pkr,
-          },
-          wc.beneficiary_account_email ? [wc.beneficiary_account_email] : []
-        );
+        if (status === 'approved') {
+          await emitNotification(
+            {
+              event_type: 'case_approved_live',
+              audience: 'beneficiary',
+              target_code: wc.case_code,
+              case_id: wc.id,
+              campaign_id: null,
+              title_en: `Case Approved & Live for Funding (${wc.case_code})`,
+              title_ur: `آپ کا کیس منظور ہو کر فنڈنگ کے لیے لائیو ہو گیا (${wc.case_code})`,
+              body_en: `Alhamdulillah! After ground verification, your request (${wc.case_code}) for PKR ${wc.target_amount_pkr.toLocaleString('en-PK')} via ${wc.vendor_name} is now LIVE on Amanat with 100% privacy protection.`,
+              body_ur: `الحمدللہ! فیلڈ تصدیق کے بعد آپ کی درخواست (${wc.case_code}) مکمل رازداری کے ساتھ امانت پر فنڈنگ کے لیے لائیو کر دی گئی ہے۔`,
+              vendor_name: wc.vendor_name,
+              district: wc.district,
+              collected_pkr: wc.raised_amount_pkr,
+              target_pkr: wc.target_amount_pkr,
+            },
+            wc.beneficiary_account_email ? [wc.beneficiary_account_email] : []
+          );
+        } else if (status === 'rejected') {
+          await emitNotification(
+            {
+              event_type: 'case_submitted',
+              audience: 'beneficiary',
+              target_code: wc.case_code,
+              case_id: wc.id,
+              campaign_id: null,
+              title_en: `Update on Your Request (${wc.case_code}) — Not Approved`,
+              title_ur: `آپ کی درخواست (${wc.case_code}) کے بارے میں اطلاع`,
+              body_en: `After review, your request (${wc.case_code}) could not be approved at this time.${cleanReason ? ` Reason: ${cleanReason}` : ''} You may submit an updated application with complete vendor documentation if applicable.`,
+              body_ur: `جائزے کے بعد فی الحال آپ کی درخواست (${wc.case_code}) منظور نہیں ہو سکی۔${cleanReason ? ` وجہ: ${cleanReason}` : ''} مکمل وینڈر بل کے ساتھ دوبارہ درخواست دی جا سکتی ہے۔`,
+              vendor_name: wc.vendor_name,
+              district: wc.district,
+            },
+            wc.beneficiary_account_email ? [wc.beneficiary_account_email] : []
+          );
+        }
       }
       return;
     }
-    await localDb.cases.update(caseId, { status: 'approved' });
+
+    await localDb.cases.update(caseId, { status, rejection_reason: cleanReason });
     const wc = await localDb.cases.get(caseId);
-    if (wc) {
+    if (wc && status === 'approved') {
       await emitNotification(
         {
           event_type: 'case_approved_live',
@@ -1130,6 +1162,184 @@ export const dataClient = {
         },
         wc.beneficiary_account_email ? [wc.beneficiary_account_email] : []
       );
+    } else if (wc && status === 'rejected') {
+      await emitNotification(
+        {
+          event_type: 'case_submitted',
+          audience: 'beneficiary',
+          target_code: wc.case_code,
+          case_id: wc.id,
+          campaign_id: null,
+          title_en: `Update on Your Request (${wc.case_code}) — Not Approved`,
+          title_ur: `آپ کی درخواست (${wc.case_code}) کے بارے میں اطلاع`,
+          body_en: `After review, your request (${wc.case_code}) could not be approved at this time.${cleanReason ? ` Reason: ${cleanReason}` : ''}`,
+          body_ur: `جائزے کے بعد فی الحال آپ کی درخواست (${wc.case_code}) منظور نہیں ہو سکی۔${cleanReason ? ` وجہ: ${cleanReason}` : ''}`,
+          vendor_name: wc.vendor_name,
+          district: wc.district,
+        },
+        wc.beneficiary_account_email ? [wc.beneficiary_account_email] : []
+      );
+    }
+  },
+
+  async updateDonationStatus(
+    donationId: string,
+    nextStatus: Donation['status'],
+    rejectionReason?: string
+  ): Promise<void> {
+    await ensureLocalSeeded();
+    const isCounted = (s: Donation['status']) => s === 'confirmed' || s === 'paid_to_vendor';
+    const isPledged = (s: Donation['status']) => s === 'pledged_pending_verify';
+    const cleanReason = nextStatus === 'rejected' ? rejectionReason?.trim() || null : null;
+
+    if (supabase) {
+      const { data: don } = await supabase
+        .from('donations')
+        .select('*')
+        .eq('id', donationId)
+        .maybeSingle();
+      if (!don) return;
+      const prevStatus = (don as Donation).status;
+      if (prevStatus === nextStatus) return;
+
+      if (prevStatus === 'pledged_pending_verify' && nextStatus === 'confirmed') {
+        await this.confirmDonation(donationId);
+        return;
+      }
+
+      const { error } = await supabase
+        .from('donations')
+        .update({ status: nextStatus, rejection_reason: cleanReason })
+        .eq('id', donationId);
+      if (error) throw error;
+
+      const amt = (don as Donation).amount_pkr;
+      const collectedDelta =
+        (isCounted(nextStatus) ? amt : 0) - (isCounted(prevStatus) ? amt : 0);
+      const pledgedDelta =
+        (isPledged(nextStatus) ? amt : 0) - (isPledged(prevStatus) ? amt : 0);
+      const donorCountDelta =
+        (isCounted(nextStatus) ? 1 : 0) - (isCounted(prevStatus) ? 1 : 0);
+
+      let targetCode = 'AMANAT';
+      let vendorName = 'Amanat Escrow Vendor';
+      let district = 'Punjab';
+
+      if ((don as Donation).campaign_id) {
+        const { data: camp } = await supabase
+          .from('crowdfunding_campaigns')
+          .select('*')
+          .eq('id', (don as Donation).campaign_id)
+          .maybeSingle();
+        if (camp) {
+          const c = camp as CrowdfundingCampaign;
+          targetCode = c.campaign_code;
+          vendorName = c.vendor_name;
+          district = c.district;
+          const nextCollected = Math.max(0, c.collected_amount_pkr + collectedDelta);
+          const nextPledged = Math.max(0, c.pledged_amount_pkr + pledgedDelta);
+          const nextDonors = Math.max(0, c.donor_count + donorCountDelta);
+          await supabase
+            .from('crowdfunding_campaigns')
+            .update({
+              collected_amount_pkr: nextCollected,
+              pledged_amount_pkr: nextPledged,
+              donor_count: nextDonors,
+              status:
+                c.status === 'fully_funded' && nextCollected < c.target_amount_pkr
+                  ? 'active'
+                  : nextCollected >= c.target_amount_pkr && c.status === 'active'
+                  ? 'fully_funded'
+                  : c.status,
+            })
+            .eq('id', c.id);
+        }
+      } else if ((don as Donation).case_id) {
+        const { data: cs } = await supabase
+          .from('cases')
+          .select('*')
+          .eq('id', (don as Donation).case_id)
+          .maybeSingle();
+        if (cs) {
+          const wc = cs as WelfareCase;
+          targetCode = wc.case_code;
+          vendorName = wc.vendor_name;
+          district = wc.district;
+          const nextRaised = Math.max(0, wc.raised_amount_pkr + collectedDelta);
+          const nextPledged = Math.max(0, wc.pledged_amount_pkr + pledgedDelta);
+          await supabase
+            .from('cases')
+            .update({
+              raised_amount_pkr: nextRaised,
+              pledged_amount_pkr: nextPledged,
+              status:
+                wc.status === 'funded' && nextRaised < wc.target_amount_pkr
+                  ? 'approved'
+                  : nextRaised >= wc.target_amount_pkr && wc.status === 'approved'
+                  ? 'funded'
+                  : wc.status,
+            })
+            .eq('id', wc.id);
+        }
+      }
+
+      if (nextStatus === 'rejected' && (don as Donation).donor_email) {
+        await emitNotification(
+          {
+            event_type: 'donation_pledged',
+            audience: 'donor',
+            target_code: targetCode,
+            case_id: (don as Donation).case_id,
+            campaign_id: (don as Donation).campaign_id,
+            title_en: `Contribution Could Not Be Verified (Ref: ${(don as Donation).transaction_ref})`,
+            title_ur: `آپ کے عطیے کی تصدیق نہ ہو سکی (ریفرنس: ${(don as Donation).transaction_ref})`,
+            body_en: `We could not verify your transfer reference (${(don as Donation).transaction_ref}) for PKR ${amt.toLocaleString('en-PK')}.${cleanReason ? ` Note: ${cleanReason}` : ''} Please double-check your payment receipt or reply to support.amanat@gmail.com.`,
+            body_ur: `آپ کا ٹرانزیکشن ریفرنس (${(don as Donation).transaction_ref}) تصدیق نہیں ہو سکا۔${cleanReason ? ` وجہ: ${cleanReason}` : ''} براہِ کرم اپنی رسید چیک کریں یا support.amanat@gmail.com پر رابطہ کریں۔`,
+            vendor_name: vendorName,
+            district,
+          },
+          [(don as Donation).donor_email!]
+        );
+      }
+      return;
+    }
+
+    const don = await localDb.donations.get(donationId);
+    if (!don || don.status === nextStatus) return;
+    if (don.status === 'pledged_pending_verify' && nextStatus === 'confirmed') {
+      await this.confirmDonation(donationId);
+      return;
+    }
+    const prevStatus = don.status;
+    await localDb.donations.update(donationId, {
+      status: nextStatus,
+      rejection_reason: cleanReason,
+    });
+    const amt = don.amount_pkr;
+    const collectedDelta =
+      (isCounted(nextStatus) ? amt : 0) - (isCounted(prevStatus) ? amt : 0);
+    const pledgedDelta =
+      (isPledged(nextStatus) ? amt : 0) - (isPledged(prevStatus) ? amt : 0);
+    const donorCountDelta =
+      (isCounted(nextStatus) ? 1 : 0) - (isCounted(prevStatus) ? 1 : 0);
+
+    if (don.campaign_id) {
+      const c = await localDb.crowdfunding_campaigns.get(don.campaign_id);
+      if (c) {
+        await localDb.crowdfunding_campaigns.update(c.id, {
+          collected_amount_pkr: Math.max(0, c.collected_amount_pkr + collectedDelta),
+          pledged_amount_pkr: Math.max(0, c.pledged_amount_pkr + pledgedDelta),
+          donor_count: Math.max(0, c.donor_count + donorCountDelta),
+        });
+      }
+    } else if (don.case_id) {
+      const wc = await localDb.cases.get(don.case_id);
+      if (wc) {
+        await localDb.cases.update(wc.id, {
+          raised_amount_pkr: Math.max(0, wc.raised_amount_pkr + collectedDelta),
+          pledged_amount_pkr: Math.max(0, wc.pledged_amount_pkr + pledgedDelta),
+        });
+      }
     }
   },
 

@@ -88,10 +88,10 @@ export function buildBrandedEmailHtml(args: BuildMilestoneNotificationArgs): str
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:#FFFFFF;border-radius:20px;overflow:hidden;border:1px solid #D1FAE5;box-shadow:0 12px 32px rgba(6,78,59,0.08);">
           <tr>
-            <td style="background:linear-gradient(135deg,#022C22,#064E3B);padding:26px 28px;color:#FFFFFF;border-bottom:4px solid #F59E0B;">
-              <div style="font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:#FDE68A;font-weight:700;">${escapeHtml(audienceLabel)} · ${escapeHtml(args.target_code)}</div>
-              <div style="font-size:22px;font-weight:800;margin-top:6px;">Amanat (امانت) — Sacred Trust</div>
-              <div style="font-size:12px;color:#A7F3D0;margin-top:3px;">100% Direct Vendor Escrow · 0% Platform Fee · ${escapeHtml(args.district)}, Punjab</div>
+            <td style="background:#064E3B;padding:22px 26px;color:#FFFFFF;border-bottom:3px solid #D97706;">
+              <div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#FDE68A;font-weight:700;">${escapeHtml(audienceLabel)} · ${escapeHtml(args.target_code)}</div>
+              <div style="font-size:20px;font-weight:800;margin-top:5px;">Amanat (امانت) — Direct Welfare Escrow</div>
+              <div style="font-size:12px;color:#D1FAE5;margin-top:3px;">0% Platform Fee · ${escapeHtml(args.district)}, Punjab</div>
             </td>
           </tr>
           <tr>
@@ -195,7 +195,7 @@ export function createNotificationRecord(
     title_ur: args.title_ur,
     body_en: args.body_en,
     body_ur: args.body_ur,
-    email_subject: `[Amanat ${args.target_code}] ${args.title_en}`,
+    email_subject: `Amanat ${args.target_code}: ${args.title_en}`,
     email_html: buildBrandedEmailHtml(args),
     telegram_text: buildTelegramCardText(args),
     recipient_emails: uniqueEmails,

@@ -34,8 +34,10 @@ import type {
   AppSettings,
   CampaignCategory,
   CampaignStatus,
+  CaseStatus,
   CrowdfundingCampaign,
   Donation,
+  DonationStatus,
   FundingType,
   NotificationRecord,
   Profile,
@@ -68,7 +70,17 @@ interface AdminWorkspaceProps {
   }) => Promise<CrowdfundingCampaign>;
   onUpdateCampaignStatus: (id: string, status: CampaignStatus) => Promise<void>;
   onConfirmDonation: (donationId: string) => Promise<void>;
+  onUpdateDonationStatus: (
+    donationId: string,
+    status: DonationStatus,
+    rejectionReason?: string
+  ) => Promise<void>;
   onApproveCase: (caseId: string) => Promise<void>;
+  onUpdateCaseStatus: (
+    caseId: string,
+    status: CaseStatus,
+    rejectionReason?: string
+  ) => Promise<void>;
   onAssignVerifier: (caseId: string, verifierId: string) => Promise<void>;
   onToggleVerifier: (profileId: string, accredited: boolean) => Promise<void>;
   onUploadCampaignReceipt: (id: string, receiptUrl: string) => Promise<void>;
@@ -93,7 +105,9 @@ export function AdminWorkspace({
   onCreateCampaign,
   onUpdateCampaignStatus,
   onConfirmDonation,
+  onUpdateDonationStatus,
   onApproveCase,
+  onUpdateCaseStatus,
   onAssignVerifier,
   onToggleVerifier,
   onUploadCampaignReceipt,
@@ -109,6 +123,7 @@ export function AdminWorkspace({
 }: AdminWorkspaceProps) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<'crowdfunding' | 'audit' | 'settings'>('crowdfunding');
+  const [donationFilter, setDonationFilter] = useState<'all' | DonationStatus>('all');
   const [notice, setNotice] = useState<string | null>(null);
 
   // New Campaign form state
@@ -268,7 +283,7 @@ export function AdminWorkspace({
                 : 'text-emerald-100 hover:bg-white/10'
             )}
           >
-            {t('admin.tabCrowdfunding')} ({campaigns.length})
+            Crowdfunding Drives ({campaigns.length})
           </button>
           <button
             type="button"
@@ -280,7 +295,7 @@ export function AdminWorkspace({
                 : 'text-emerald-100 hover:bg-white/10'
             )}
           >
-            {t('admin.tabAudit')} ({pendingDonations.length + fieldVerifiedCases.length + incomingTriageCases.length})
+            Individual Cases &amp; Donations ({cases.length} / {donations.length})
           </button>
           <button
             type="button"
@@ -482,7 +497,7 @@ export function AdminWorkspace({
               <Card key={camp.id} className="p-5 space-y-3.5">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-xs font-extrabold text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded">
                         {camp.campaign_code}
                       </span>
@@ -497,6 +512,22 @@ export function AdminWorkspace({
                       >
                         {camp.status.replace(/_/g, ' ').toUpperCase()}
                       </Badge>
+                      <span
+                        className={cn(
+                          'rounded-full px-2 py-0.5 text-[10px] font-extrabold',
+                          camp.status === 'active' ||
+                            camp.status === 'fully_funded' ||
+                            camp.status === 'disbursed_to_vendor'
+                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                            : 'bg-slate-100 text-slate-600 border border-slate-200'
+                        )}
+                      >
+                        {camp.status === 'active' ||
+                        camp.status === 'fully_funded' ||
+                        camp.status === 'disbursed_to_vendor'
+                          ? 'LIVE ON LANDING PAGE (COLLECTIVE DRIVES)'
+                          : 'HIDDEN FROM LANDING PAGE'}
+                      </span>
                     </div>
                     <h3 className="mt-1.5 text-sm font-extrabold text-emerald-950">
                       {camp.title_en}
@@ -585,68 +616,166 @@ export function AdminWorkspace({
       ) : tab === 'audit' ? (
         /* Case & Payment Audit Tab */
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-          <Card className="lg:col-span-7 p-6 space-y-4">
-            <h2 className="text-base font-extrabold text-emerald-950 flex items-center gap-2">
-              <FileCheck2 className="h-5 w-5 text-gold-600" />
-              {t('admin.pendingDonations')} ({pendingDonations.length})
-            </h2>
+          <Card className="lg:col-span-7 p-6 space-y-5">
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-base font-extrabold text-emerald-950 flex items-center gap-2">
+                  <FileCheck2 className="h-5 w-5 text-gold-600" />
+                  Donor Contributions Ledger ({donations.length})
+                </h2>
+                <span className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
+                  {pendingDonations.length} Pledged Pending
+                </span>
+              </div>
 
-            {pendingDonations.length === 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {(
+                  [
+                    { id: 'all', label: `All (${donations.length})` },
+                    { id: 'pledged_pending_verify', label: `Pledged (${pendingDonations.length})` },
+                    {
+                      id: 'confirmed',
+                      label: `Confirmed (${donations.filter((d) => d.status === 'confirmed').length})`,
+                    },
+                    {
+                      id: 'rejected',
+                      label: `Rejected (${donations.filter((d) => d.status === 'rejected').length})`,
+                    },
+                    {
+                      id: 'paid_to_vendor',
+                      label: `Paid (${donations.filter((d) => d.status === 'paid_to_vendor').length})`,
+                    },
+                  ] as const
+                ).map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setDonationFilter(f.id)}
+                    className={cn(
+                      'rounded-full px-3 py-1 text-[11px] font-bold border transition-all',
+                      donationFilter === f.id
+                        ? 'bg-emerald-900 text-white border-emerald-900'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-emerald-50'
+                    )}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {donations.filter((d) => donationFilter === 'all' || d.status === donationFilter)
+              .length === 0 ? (
               <p className="rounded-xl bg-slate-50 p-4 text-xs text-slate-600">
-                All donor transaction references are confirmed.
+                No donor contributions match this status filter.
               </p>
             ) : (
-              <div className="space-y-3">
-                {pendingDonations.map((d) => (
-                  <div
-                    key={d.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-gold-200 bg-gold-50/40 p-4"
-                  >
-                    <div className="space-y-1 text-xs">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-extrabold text-emerald-950 text-sm">
-                          {formatPKR(d.amount_pkr)}
-                        </span>
-                        <Badge variant="gold">{d.payment_channel.toUpperCase()}</Badge>
-                        <span className="font-mono font-bold text-slate-700">
-                          REF: {d.transaction_ref}
-                        </span>
+              <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                {donations
+                  .filter((d) => donationFilter === 'all' || d.status === donationFilter)
+                  .map((d) => (
+                    <div
+                      key={d.id}
+                      className={cn(
+                        'flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border p-4',
+                        d.status === 'pledged_pending_verify'
+                          ? 'border-gold-200 bg-gold-50/40'
+                          : d.status === 'rejected'
+                          ? 'border-rose-200 bg-rose-50/40'
+                          : 'border-emerald-200 bg-emerald-50/30'
+                      )}
+                    >
+                      <div className="space-y-1 text-xs min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-extrabold text-emerald-950 text-sm">
+                            {formatPKR(d.amount_pkr)}
+                          </span>
+                          <Badge
+                            variant={
+                              d.status === 'confirmed' || d.status === 'paid_to_vendor'
+                                ? 'emerald'
+                                : d.status === 'rejected'
+                                ? 'rose'
+                                : 'gold'
+                            }
+                          >
+                            {d.status.replace(/_/g, ' ').toUpperCase()}
+                          </Badge>
+                          <span className="font-mono font-bold text-slate-700">
+                            {d.payment_channel.toUpperCase()} · {d.transaction_ref}
+                          </span>
+                        </div>
+                        <p className="text-slate-600 font-medium">{getDonationTargetLabel(d)}</p>
+                        <p className="font-mono text-[11px] text-slate-500">
+                          QR: {d.receipt_qr_hash}
+                          {d.donor_email ? ` · ${d.donor_email}` : ''}
+                        </p>
+                        {d.status === 'rejected' && d.rejection_reason && (
+                          <p className="text-[11px] font-semibold text-rose-800">
+                            Reason: {d.rejection_reason}
+                          </p>
+                        )}
                       </div>
-                      <p className="text-slate-600 font-medium">{getDonationTargetLabel(d)}</p>
-                      <p className="font-mono text-[11px] text-slate-500">
-                        QR: {d.receipt_qr_hash}
-                      </p>
-                    </div>
 
-                    <div className="flex items-center gap-1.5">
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={async () => {
-                          await onConfirmDonation(d.id);
-                          setNotice(
-                            `Confirmed ${formatPKR(d.amount_pkr)} (Ref: ${d.transaction_ref}) — progress bar & donor count updated!`
-                          );
-                        }}
-                      >
-                        <CheckCircle2 className="h-4 w-4" />
-                        {t('admin.confirmPayment')}
-                      </Button>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={async () => {
-                          if (!window.confirm(`Delete donation ref ${d.transaction_ref}?`)) return;
-                          await onDeleteDonation(d.id);
-                          setNotice(`Deleted donation ${d.transaction_ref}.`);
-                        }}
-                        title="Delete Donation"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                        <Select
+                          value={d.status}
+                          onChange={async (e) => {
+                            const next = e.target.value as DonationStatus;
+                            let reason: string | undefined;
+                            if (next === 'rejected') {
+                              const input = window.prompt(
+                                `Optional rejection reason for Ref ${d.transaction_ref} (sent politely to donor):`,
+                                'Transaction reference could not be verified on bank/wallet statement.'
+                              );
+                              if (input === null) return;
+                              reason = input;
+                            }
+                            await onUpdateDonationStatus(d.id, next, reason);
+                            setNotice(
+                              `Updated ${d.transaction_ref} to ${next.replace(/_/g, ' ').toUpperCase()} — ledger totals synced!`
+                            );
+                          }}
+                          className="h-8 text-[11px] font-bold py-1 px-2 w-auto"
+                          aria-label={`Change status for donation ${d.transaction_ref}`}
+                        >
+                          <option value="pledged_pending_verify">Pledged (Pending)</option>
+                          <option value="confirmed">Approved (Confirmed)</option>
+                          <option value="rejected">Rejected</option>
+                          <option value="paid_to_vendor">Paid to Vendor</option>
+                        </Select>
+
+                        {d.status === 'pledged_pending_verify' && (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={async () => {
+                              await onConfirmDonation(d.id);
+                              setNotice(
+                                `Confirmed ${formatPKR(d.amount_pkr)} (Ref: ${d.transaction_ref}) — progress bar & donor count updated!`
+                              );
+                            }}
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            Approve
+                          </Button>
+                        )}
+
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={async () => {
+                            if (!window.confirm(`Delete donation ref ${d.transaction_ref}?`)) return;
+                            await onDeleteDonation(d.id);
+                            setNotice(`Deleted donation ${d.transaction_ref}.`);
+                          }}
+                          title="Delete Donation"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
               </div>
             )}
 
@@ -804,55 +933,123 @@ export function AdminWorkspace({
             </Card>
 
             <Card className="p-6 space-y-3">
-              <h2 className="text-sm font-extrabold text-emerald-950 flex items-center gap-2">
-                <Receipt className="h-4 w-4 text-gold-600" />
-                Upload Paid Vendor Receipts (Approved Cases)
-              </h2>
-              {cases
-                .filter((c) => c.status === 'approved' || c.status === 'funded')
-                .slice(0, 4)
-                .map((c) => (
-                  <div
-                    key={c.id}
-                    className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 p-3 text-xs"
-                  >
-                    <div className="min-w-0">
-                      <p className="font-mono font-bold text-emerald-900">{c.case_code}</p>
-                      <p className="truncate text-slate-600">{c.vendor_name}</p>
+              <div>
+                <h2 className="text-sm font-extrabold text-emerald-950 flex items-center gap-2">
+                  <Receipt className="h-4 w-4 text-gold-600" />
+                  All Individual Cases Control ({cases.length})
+                </h2>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Controls Landing Page → <strong>Field-Verified Individual Cases</strong>. Change
+                  status (Approved, Pending, Rejected, Paid) or delete any entry.
+                </p>
+              </div>
+              <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
+                {cases.map((c) => {
+                  const isPublicLive = ['approved', 'funded', 'disbursed_to_vendor'].includes(
+                    c.status
+                  );
+                  return (
+                    <div
+                      key={c.id}
+                      className="rounded-xl border border-slate-200 bg-white p-3 text-xs space-y-2"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-mono font-extrabold text-emerald-900">
+                              {c.case_code}
+                            </span>
+                            <span
+                              className={cn(
+                                'rounded-full px-2 py-0.5 text-[10px] font-extrabold',
+                                isPublicLive
+                                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                  : c.status === 'rejected'
+                                  ? 'bg-rose-50 text-rose-800 border border-rose-200'
+                                  : 'bg-slate-100 text-slate-600 border border-slate-200'
+                              )}
+                            >
+                              {isPublicLive
+                                ? 'LIVE ON LANDING PAGE'
+                                : c.status === 'rejected'
+                                ? 'REJECTED (HIDDEN)'
+                                : 'HIDDEN (IN REVIEW)'}
+                            </span>
+                          </div>
+                          <p className="truncate text-slate-600 mt-0.5">
+                            {c.district} · {c.vendor_name} ({formatPKR(c.target_amount_pkr)})
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Select
+                          value={c.status}
+                          onChange={async (e) => {
+                            const next = e.target.value as CaseStatus;
+                            let reason: string | undefined;
+                            if (next === 'rejected') {
+                              const input = window.prompt(
+                                `Optional rejection reason for ${c.case_code} (sent politely to beneficiary):`,
+                                'Incomplete vendor quotation or eligibility could not be confirmed.'
+                              );
+                              if (input === null) return;
+                              reason = input;
+                            }
+                            await onUpdateCaseStatus(c.id, next, reason);
+                            setNotice(
+                              `Updated ${c.case_code} to ${next.replace(/_/g, ' ').toUpperCase()}!`
+                            );
+                          }}
+                          className="h-8 text-[11px] font-bold py-1 px-2 flex-1 min-w-[140px]"
+                          aria-label={`Change status for case ${c.case_code}`}
+                        >
+                          <option value="pending_admin_review">Pending Admin Review</option>
+                          <option value="pending_field_visit">Pending Field Visit</option>
+                          <option value="field_verified">Field Verified</option>
+                          <option value="approved">Approved (Live on Landing)</option>
+                          <option value="funded">Funded</option>
+                          <option value="disbursed_to_vendor">Paid to Vendor</option>
+                          <option value="rejected">Rejected</option>
+                        </Select>
+
+                        {(c.status === 'approved' || c.status === 'funded') && (
+                          <Button
+                            variant="gold"
+                            size="sm"
+                            onClick={async () => {
+                              const rcpt = makeInvoiceDataUrl(
+                                `Paid Vendor Receipt (${c.case_code})`,
+                                c.vendor_name,
+                                c.raised_amount_pkr || c.target_amount_pkr,
+                                `RCPT-${c.case_code}`,
+                                true
+                              );
+                              await onUploadCaseReceipt(c.id, rcpt);
+                              setNotice(`Closed loop with Paid Vendor Receipt for ${c.case_code}!`);
+                            }}
+                          >
+                            Mark Paid
+                          </Button>
+                        )}
+
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={async () => {
+                            if (!window.confirm(`Delete case ${c.case_code}?`)) return;
+                            await onDeleteCase(c.id);
+                            setNotice(`Deleted case ${c.case_code}.`);
+                          }}
+                          title="Delete Case"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <Button
-                        variant="gold"
-                        size="sm"
-                        onClick={async () => {
-                          const rcpt = makeInvoiceDataUrl(
-                            `Paid Vendor Receipt (${c.case_code})`,
-                            c.vendor_name,
-                            c.raised_amount_pkr || c.target_amount_pkr,
-                            `RCPT-${c.case_code}`,
-                            true
-                          );
-                          await onUploadCaseReceipt(c.id, rcpt);
-                          setNotice(`Closed loop with Paid Vendor Receipt for ${c.case_code}!`);
-                        }}
-                      >
-                        Mark Paid
-                      </Button>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={async () => {
-                          if (!window.confirm(`Delete case ${c.case_code}?`)) return;
-                          await onDeleteCase(c.id);
-                          setNotice(`Deleted case ${c.case_code}.`);
-                        }}
-                        title="Delete Case"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
+              </div>
             </Card>
           </div>
         </div>
