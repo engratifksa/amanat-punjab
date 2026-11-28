@@ -345,7 +345,7 @@ export function PaymentModal({
                       type="email"
                       value={donorEmail}
                       onChange={(e) => setDonorEmail(e.target.value)}
-                      placeholder="Your Email (sent from support.amanat@gmail.com)"
+                      placeholder="Your Email (sent from notifications@amanatpunjab.org)"
                     />
                     <Input
                       type="text"
@@ -395,12 +395,6 @@ export function PaymentModal({
                   </h4>
                   <p className="text-xs text-emerald-900/80 mt-0.5">
                     {t('payment.successSub')}
-                  </p>
-                  <p className="text-[11px] text-emerald-800/90 mt-1.5 bg-white/80 rounded-lg px-2.5 py-1.5 border border-emerald-200/70">
-                    <strong>Inbox Tip:</strong> Check your Inbox (or Spam folder once) for{' '}
-                    <span className="font-mono font-bold">support.amanat@gmail.com</span> and tap{' '}
-                    <strong>&ldquo;Not Spam&rdquo;</strong> so all future escrow &amp; receipt
-                    alerts land straight in your Primary Inbox.
                   </p>
                 </div>
               </div>

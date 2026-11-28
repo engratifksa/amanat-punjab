@@ -99,7 +99,7 @@ export function NotificationBell({
                 <div className="min-w-0">
                   <p className="text-xs font-extrabold truncate">Amanat 3-Channel Updates</p>
                   <p className="text-[10px] text-emerald-200 truncate">
-                    App · Gmail (support.amanat@gmail.com) · Telegram
+                    App · Email (notifications@amanatpunjab.org) · Telegram
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">

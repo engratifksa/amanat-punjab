@@ -283,12 +283,6 @@ export function BeneficiaryWorkspace({
                   reviewing it alongside other deserving families.
                 </div>
               )}
-              <p className="text-[11px] font-medium text-emerald-800 bg-white/80 rounded-xl px-3 py-2 border border-emerald-200/70">
-                <strong>Inbox Tip (ای میل ہدایت):</strong> Check your Inbox (or Spam folder once)
-                for <span className="font-mono font-bold">support.amanat@gmail.com</span> and tap{' '}
-                <strong>&ldquo;Not Spam&rdquo;</strong> so Field Verifier visit alerts &amp; QR
-                safety instructions land directly in your Primary Inbox.
-              </p>
             </div>
           )}
 

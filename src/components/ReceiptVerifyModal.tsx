@@ -148,7 +148,7 @@ export function ReceiptVerifyModal({
                 <p className="mt-1">
                   No escrow donation matches QR hash <code className="font-mono">{qrHash}</code>.
                   Please double-check the certificate link or contact{' '}
-                  <strong>support.amanat@gmail.com</strong>.
+                  <strong>support@amanatpunjab.org</strong>.
                 </p>
               </div>
             </div>

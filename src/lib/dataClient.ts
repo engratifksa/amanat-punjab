@@ -329,10 +329,11 @@ async function emitNotification(
   const senderEmail =
     settings.email_gateway?.senderEmail ||
     settings.social_links.email ||
-    'support.amanat@gmail.com';
+    'support@amanatpunjab.org';
 
   let subs: NotificationSubscription[] = [];
   const dbDiscoveredEmails: string[] = [];
+  const profileDiscoveredTelegramIds: string[] = [];
 
   if (supabase) {
     const query = supabase.from('notification_subscriptions').select('*');
@@ -392,12 +393,44 @@ async function emitNotification(
     return s.role === partial.audience;
   });
 
+  const targetUserEmails = Array.from(
+    new Set(
+      [...extraEmails, ...dbDiscoveredEmails, ...filteredSubs.map((s) => s.email ?? '')]
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => e.includes('@') && e !== senderEmail.trim().toLowerCase())
+    )
+  );
+
+  // Auto-resolve saved Telegram Chat IDs from `profiles` for every targeted recipient
+  if (targetUserEmails.length > 0) {
+    if (supabase) {
+      const { data: profRows } = await supabase
+        .from('profiles')
+        .select('email, telegram_chat_id')
+        .in('email', targetUserEmails);
+      for (const p of (profRows ?? []) as Array<{ email?: string | null; telegram_chat_id?: string | null }>) {
+        if (p.telegram_chat_id?.trim()) {
+          profileDiscoveredTelegramIds.push(p.telegram_chat_id.trim());
+        }
+      }
+    } else {
+      const allProfs = await localDb.profiles.toArray();
+      for (const p of allProfs) {
+        if (
+          p.email &&
+          targetUserEmails.includes(p.email.trim().toLowerCase()) &&
+          p.telegram_chat_id?.trim()
+        ) {
+          profileDiscoveredTelegramIds.push(p.telegram_chat_id.trim());
+        }
+      }
+    }
+  }
+
   const emails = Array.from(
     new Set(
       [
-        ...extraEmails,
-        ...dbDiscoveredEmails,
-        ...filteredSubs.map((s) => s.email ?? ''),
+        ...targetUserEmails,
         senderEmail,
       ]
         .map((e) => e.trim().toLowerCase())
@@ -407,7 +440,11 @@ async function emitNotification(
 
   const telegramIds = Array.from(
     new Set(
-      [...extraTelegramIds, ...filteredSubs.map((s) => s.telegram_chat_id ?? '')]
+      [
+        ...extraTelegramIds,
+        ...profileDiscoveredTelegramIds,
+        ...filteredSubs.map((s) => s.telegram_chat_id ?? ''),
+      ]
         .map((t) => t.trim())
         .filter(Boolean)
     )
@@ -2149,13 +2186,35 @@ export const dataClient = {
     if (supabase) {
       const { data, error } = await supabase.from('donations').insert(donation).select().single();
       if (error) throw error;
+
+      // Persist donor notification subscription (Email + Telegram Chat ID) for milestone & status alerts
+      await saveSubscription({
+        role: 'donor',
+        case_id: input.case_id,
+        campaign_id: input.campaign_id,
+        email: input.donor_email?.trim() || null,
+        telegram_chat_id: input.donor_telegram_id?.trim() || null,
+      });
+
+      // Also save Telegram Chat ID onto the donor's profile so future alerts always reach them
+      if (input.donor_email?.trim() && input.donor_telegram_id?.trim()) {
+        await supabase
+          .from('profiles')
+          .update({ telegram_chat_id: input.donor_telegram_id.trim() })
+          .eq('email', input.donor_email.trim().toLowerCase());
+      }
+
+      let vendorForPledge = 'Verified Escrow Vendor';
+      let districtForPledge = 'Punjab';
       if (input.campaign_id) {
         const { data: camp } = await supabase
           .from('crowdfunding_campaigns')
-          .select('pledged_amount_pkr')
+          .select('pledged_amount_pkr, vendor_name, district')
           .eq('id', input.campaign_id)
           .single();
         if (camp) {
+          vendorForPledge = camp.vendor_name || vendorForPledge;
+          districtForPledge = camp.district || districtForPledge;
           await supabase
             .from('crowdfunding_campaigns')
             .update({ pledged_amount_pkr: camp.pledged_amount_pkr + input.amount_pkr })
@@ -2164,16 +2223,37 @@ export const dataClient = {
       } else if (input.case_id) {
         const { data: c } = await supabase
           .from('cases')
-          .select('pledged_amount_pkr')
+          .select('pledged_amount_pkr, vendor_name, district')
           .eq('id', input.case_id)
           .single();
         if (c) {
+          vendorForPledge = c.vendor_name || vendorForPledge;
+          districtForPledge = c.district || districtForPledge;
           await supabase
             .from('cases')
             .update({ pledged_amount_pkr: c.pledged_amount_pkr + input.amount_pkr })
             .eq('id', input.case_id);
         }
       }
+
+      await emitNotification(
+        {
+          event_type: 'donation_pledged',
+          audience: 'donor',
+          target_code: input.target_code,
+          case_id: input.case_id,
+          campaign_id: input.campaign_id,
+          title_en: `Pledge Received — PKR ${input.amount_pkr.toLocaleString('en-PK')}`,
+          title_ur: `آپ کا عطیہ درج ہو گیا — ${input.amount_pkr.toLocaleString('en-PK')} روپے`,
+          body_en: `JazakAllah Khair! Your pledge (Ref: ${donation.transaction_ref}) is logged for verification. You will receive automatic updates at 25%, 50%, 75%, 100%, and Paid Vendor Receipt.`,
+          body_ur: `جزاک اللہ خیر! آپ کا عطیہ (ریفرنس: ${donation.transaction_ref}) تصدیق کے لیے درج ہو چکا ہے۔ اہم اہداف مکمل ہونے پر آپ کو خودکار اطلاع ملے گی۔`,
+          vendor_name: vendorForPledge,
+          district: districtForPledge,
+        },
+        input.donor_email ? [input.donor_email] : [],
+        input.donor_telegram_id ? [input.donor_telegram_id] : []
+      );
+
       return data as Donation;
     }
 
