@@ -470,9 +470,9 @@ export const dataClient = {
       >;
 
       return {
-        // In training mode, include real signed-in auth profiles too so Admin/Users can test roles seamlessly
+        // In training mode, include real signed-in users (Google or Email) so anyone can test roles seamlessly
         profiles: wantDemo
-          ? allProfiles.filter((p) => Boolean(p.is_demo) || Boolean(p.auth_user_id))
+          ? allProfiles.filter((p) => Boolean(p.is_demo) || Boolean(p.auth_user_id) || Boolean(p.email))
           : allProfiles.filter((p) => !p.is_demo),
         campaigns: allCampaigns.filter((c) => Boolean(c.is_demo) === wantDemo),
         cases: allCases.filter((c) => Boolean(c.is_demo) === wantDemo),
