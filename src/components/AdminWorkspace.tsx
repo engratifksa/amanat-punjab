@@ -52,6 +52,7 @@ import type {
   CrowdfundingCampaign,
   Donation,
   DonationStatus,
+  FieldVerification,
   FundingType,
   NotificationRecord,
   Profile,
@@ -66,6 +67,7 @@ import { DualProgressBar } from './DualProgressBar';
 interface AdminWorkspaceProps {
   campaigns: CrowdfundingCampaign[];
   cases: WelfareCase[];
+  verifications?: FieldVerification[];
   donations: Donation[];
   profiles: Profile[];
   notifications: NotificationRecord[];
@@ -117,6 +119,7 @@ interface AdminWorkspaceProps {
 export function AdminWorkspace({
   campaigns,
   cases,
+  verifications = [],
   donations,
   profiles,
   notifications,
@@ -1065,30 +1068,48 @@ export function AdminWorkspace({
                   No field-verified cases waiting for publication.
                 </p>
               ) : (
-                fieldVerifiedCases.map((c) => (
-                  <div
-                    key={c.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4"
-                  >
-                    <div className="text-xs space-y-1">
-                      <span className="font-mono font-extrabold text-emerald-900">
-                        {c.case_code} · {c.district} ({formatPKR(c.target_amount_pkr)})
-                      </span>
-                      <p className="text-slate-700">{c.anonymized_story_en}</p>
-                      <p className="text-slate-500">Vendor: {c.vendor_name}</p>
-                    </div>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={async () => {
-                        await onApproveCase(c.id);
-                        setNotice(`Approved & published ${c.case_code} to the public donor feed!`);
-                      }}
+                fieldVerifiedCases.map((c) => {
+                  const latestVer = verifications.find((v) => v.case_id === c.id);
+                  return (
+                    <div
+                      key={c.id}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4"
                     >
-                      {t('admin.approvePublish')}
-                    </Button>
-                  </div>
-                ))
+                      <div className="text-xs space-y-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono font-extrabold text-emerald-900">
+                            {c.case_code} · {c.district} ({formatPKR(c.target_amount_pkr)})
+                          </span>
+                          {latestVer?.handshake_pin_verified && (
+                            <Badge variant="emerald">Mutual PIN Verified</Badge>
+                          )}
+                          {latestVer?.distance_from_applicant_km !== null &&
+                            latestVer?.distance_from_applicant_km !== undefined && (
+                              <Badge
+                                variant={
+                                  latestVer.distance_from_applicant_km <= 1 ? 'emerald' : 'gold'
+                                }
+                              >
+                                GPS: {latestVer.distance_from_applicant_km.toFixed(2)} km
+                              </Badge>
+                            )}
+                        </div>
+                        <p className="text-slate-700">{c.anonymized_story_en}</p>
+                        <p className="text-slate-500">Vendor: {c.vendor_name}</p>
+                      </div>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={async () => {
+                          await onApproveCase(c.id);
+                          setNotice(`Approved & published ${c.case_code} to the public donor feed!`);
+                        }}
+                      >
+                        {t('admin.approvePublish')}
+                      </Button>
+                    </div>
+                  );
+                })
               )}
             </div>
           </Card>
@@ -1104,11 +1125,32 @@ export function AdminWorkspace({
                   key={v.id}
                   className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3"
                 >
-                  <div className="text-xs">
-                    <p className="font-extrabold text-slate-900">{v.full_name}</p>
-                    <p className="text-slate-500">
-                      {v.district} · {v.tehsil}
-                    </p>
+                  <div className="flex items-center gap-3 min-w-0">
+                    {v.photo_url ? (
+                      <img
+                        src={v.photo_url}
+                        alt={v.full_name}
+                        className="h-11 w-11 rounded-xl object-cover border border-emerald-300 shrink-0"
+                      />
+                    ) : (
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-900/10 text-emerald-900 font-extrabold text-xs shrink-0">
+                        {v.full_name
+                          .split(' ')
+                          .map((w) => w[0])
+                          .join('')
+                          .slice(0, 2)
+                          .toUpperCase()}
+                      </div>
+                    )}
+                    <div className="text-xs min-w-0">
+                      <p className="font-extrabold text-slate-900 truncate">{v.full_name}</p>
+                      <p className="text-slate-500 truncate">
+                        {v.district} · {v.tehsil}
+                      </p>
+                      <p className="font-mono text-[10px] text-emerald-800 truncate">
+                        CNIC: {v.cnic_number || 'Pending'} {v.phone ? `· ${v.phone}` : ''}
+                      </p>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <Button

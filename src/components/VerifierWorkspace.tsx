@@ -21,7 +21,7 @@ import type {
   Profile,
   WelfareCase,
 } from '@/types/amanat';
-import { formatPKR } from '@/lib/utils';
+import { formatCnicInput, formatPKR } from '@/lib/utils';
 import { Badge, Button, Card, Input, Select, Textarea } from './ui/primitives';
 import {
   LocationPinPicker,
@@ -36,7 +36,13 @@ interface VerifierWorkspaceProps {
   currentUser: AuthUserSession | null;
   profiles: Profile[];
   onOpenAuth: () => void;
-  onApplyAsVerifier: (district: string, tehsil: string) => Promise<void>;
+  onApplyAsVerifier: (payload: {
+    district: string;
+    tehsil: string;
+    cnic_number: string;
+    phone: string;
+    photo_url: string;
+  }) => Promise<void>;
   cases: WelfareCase[];
   verifications: FieldVerification[];
   onSubmitVerification: (payload: {
@@ -50,6 +56,7 @@ interface VerifierWorkspaceProps {
     verifier_lat: number | null;
     verifier_lng: number | null;
     distance_from_applicant_km: number | null;
+    handshake_pin_verified: boolean;
     isOffline: boolean;
   }) => Promise<void>;
   onSyncOffline: () => Promise<number>;
@@ -80,7 +87,12 @@ export function VerifierWorkspace({
   const [applyTehsil, setApplyTehsil] = useState(
     currentUser?.tehsil || PUNJAB_DISTRICTS['Lahore'][0]
   );
+  const [applyCnic, setApplyCnic] = useState('');
+  const [applyPhone, setApplyPhone] = useState('');
+  const [applyPhoto, setApplyPhoto] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  const [enteredHandshakePin, setEnteredHandshakePin] = useState('');
 
   // Match ANY signed-in user against persistent Supabase profiles (never asks to sign in again!)
   const verifierProfile = currentUser
@@ -143,7 +155,7 @@ export function VerifierWorkspace({
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">District</label>
+              <label className="mb-1 block text-xs font-bold text-slate-700">District *</label>
               <Select
                 value={applyDistrict}
                 onChange={(e) => {
@@ -160,7 +172,7 @@ export function VerifierWorkspace({
               </Select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">Tehsil</label>
+              <label className="mb-1 block text-xs font-bold text-slate-700">Tehsil *</label>
               <Select value={applyTehsil} onChange={(e) => setApplyTehsil(e.target.value)}>
                 {(PUNJAB_DISTRICTS[applyDistrict] ?? [applyDistrict]).map((th) => (
                   <option key={th} value={th}>
@@ -169,16 +181,73 @@ export function VerifierWorkspace({
                 ))}
               </Select>
             </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">
+                CNIC Number * (Displayed Masked on ID Card)
+              </label>
+              <Input
+                required
+                value={applyCnic}
+                onChange={(e) => setApplyCnic(formatCnicInput(e.target.value))}
+                placeholder="35202-1234567-1"
+                className="font-mono"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">
+                Mobile Number *
+              </label>
+              <Input
+                required
+                value={applyPhone}
+                onChange={(e) => setApplyPhone(e.target.value)}
+                placeholder="0300-1234567"
+              />
+            </div>
           </div>
+
+          <SmartImageCapture
+            label="Official Portrait Photo * (Required for Anti-Scam Verifier ID Card)"
+            value={applyPhoto}
+            onChange={setApplyPhoto}
+            helperText="Take a clear selfie or upload your portrait photo. Families will see this exact Admin-approved photo when scanning your QR at their doorstep."
+          />
+
+          {applyError && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-xs font-bold text-rose-800">
+              {applyError}
+            </div>
+          )}
+
           <Button
             variant="primary"
             size="lg"
             className="w-full"
             disabled={applying}
             onClick={async () => {
+              setApplyError(null);
+              const digits = applyCnic.replace(/\D/g, '');
+              if (digits.length < 13) {
+                setApplyError('Please enter a valid 13-digit CNIC number (e.g. 35202-1234567-1).');
+                return;
+              }
+              if (!applyPhone.trim()) {
+                setApplyError('Please enter your active mobile number.');
+                return;
+              }
+              if (!applyPhoto) {
+                setApplyError('Please take or upload a clear portrait photo for your Official Verifier ID Card.');
+                return;
+              }
               setApplying(true);
               try {
-                await onApplyAsVerifier(applyDistrict, applyTehsil);
+                await onApplyAsVerifier({
+                  district: applyDistrict,
+                  tehsil: applyTehsil,
+                  cnic_number: applyCnic,
+                  phone: applyPhone.trim(),
+                  photo_url: applyPhoto,
+                });
               } finally {
                 setApplying(false);
               }
@@ -238,6 +307,10 @@ export function VerifierWorkspace({
           ? haversineDistanceKm(verifierCoords, applicantCoords)
           : null;
 
+      const pinMatched = Boolean(
+        activeCase.visit_handshake_pin &&
+          enteredHandshakePin.trim() === activeCase.visit_handshake_pin.trim()
+      );
       await onSubmitVerification({
         case_id: activeCase.id,
         verifier_id: verifierProfile?.id ?? 'prof-ver-1',
@@ -249,12 +322,14 @@ export function VerifierWorkspace({
         verifier_lat: verifierCoords?.lat ?? null,
         verifier_lng: verifierCoords?.lng ?? null,
         distance_from_applicant_km: distKm,
+        handshake_pin_verified: pinMatched,
         isOffline: simulateOffline || !navigator.onLine,
       });
       setVisitNotes('');
       setEvidencePhoto(null);
       setGpsTag('');
       setVerifierCoords(null);
+      setEnteredHandshakePin('');
       setSyncMessage(
         simulateOffline
           ? `Saved ${activeCase.case_code} offline in IndexedDB. Tap Sync when signal returns.`
@@ -454,6 +529,36 @@ export function VerifierWorkspace({
                   </div>
                 </div>
               )}
+
+              {/* Two-Way Mutual Handshake 4-Digit Visit PIN (Anti-Fake-Visit Proof) */}
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3.5 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5">
+                    <ShieldCheck className="h-4 w-4 text-emerald-700" />
+                    Two-Way Mutual Visit Handshake PIN (Ask Family In Person)
+                  </label>
+                  {activeCase.visit_handshake_pin &&
+                    enteredHandshakePin.trim() === activeCase.visit_handshake_pin.trim() && (
+                      <Badge variant="emerald">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Mutual Handshake Verified
+                      </Badge>
+                    )}
+                </div>
+                <p className="text-[11px] text-slate-600">
+                  After showing your live 60s QR ID Card to the family, ask them for their secret
+                  4-digit Amanat Visit PIN to prove an in-person mutual handshake.
+                </p>
+                <Input
+                  value={enteredHandshakePin}
+                  onChange={(e) =>
+                    setEnteredHandshakePin(e.target.value.replace(/\D/g, '').slice(0, 4))
+                  }
+                  placeholder="Enter 4-digit Visit PIN from Beneficiary (e.g. 4829)"
+                  className="font-mono tracking-[0.25em] font-bold"
+                  maxLength={4}
+                />
+              </div>
 
               {/* 1-Tap Mobile Auto-GPS Lock + Map Pin + Distance Match */}
               <LocationPinPicker

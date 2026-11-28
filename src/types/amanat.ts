@@ -62,6 +62,8 @@ export interface Profile {
   verifier_applied?: boolean;
   verifier_badge_title: string | null;
   verifier_qr_secret?: string | null;
+  photo_url?: string | null;
+  cnic_number?: string | null;
   is_demo?: boolean;
 }
 
@@ -117,6 +119,7 @@ export interface WelfareCase {
   beneficiary_address_note?: string;
   beneficiary_account_email?: string;
   rejection_reason?: string | null;
+  visit_handshake_pin?: string | null;
   is_demo?: boolean;
 }
 
@@ -134,6 +137,7 @@ export interface FieldVerification {
   distance_from_applicant_km?: number | null;
   verified_at: string;
   synced?: boolean;
+  handshake_pin_verified?: boolean;
   is_demo?: boolean;
 }
 

@@ -7,7 +7,7 @@ import {
   generateDynamicVerifierToken,
   getSecondsRemainingInWindow,
 } from '@/lib/dynamicQr';
-import { formatPKR, getPublicAppUrl } from '@/lib/utils';
+import { formatPKR, getPublicAppUrl, maskCnic } from '@/lib/utils';
 import { AmanatLogo } from './AmanatLogo';
 import { Badge, Button } from './ui/primitives';
 
@@ -66,7 +66,7 @@ export function VerifierDynamicIdCard({ verifier }: { verifier: Profile }) {
           </div>
         </div>
 
-        {/* Accredited Verifier Credentials */}
+        {/* Accredited Verifier Credentials + Portrait Photo & Masked CNIC */}
         <div className="flex-1 space-y-2.5 text-center sm:text-start">
           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
             <AmanatLogo className="h-7 w-7" />
@@ -79,15 +79,35 @@ export function VerifierDynamicIdCard({ verifier }: { verifier: Profile }) {
             </Badge>
           </div>
 
-          <div>
-            <h3 className="text-xl font-extrabold text-white">{verifier.full_name}</h3>
-            <p className="text-xs font-semibold text-emerald-200">
-              {verifier.verifier_badge_title || `Accredited Field Verifier — ${verifier.district}`}
-            </p>
-            <p className="mt-0.5 text-xs text-emerald-100/80">
-              Coverage: <strong>{verifier.tehsil}, {verifier.district}</strong> · ID:{' '}
-              <span className="font-mono text-gold-300">{verifier.id}</span>
-            </p>
+          <div className="flex flex-col sm:flex-row items-center gap-3.5">
+            {verifier.photo_url ? (
+              <img
+                src={verifier.photo_url}
+                alt={verifier.full_name}
+                className="h-16 w-16 rounded-2xl object-cover border-2 border-gold-400 shadow-md shrink-0 bg-emerald-900"
+              />
+            ) : (
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-800/80 border-2 border-gold-400/60 text-lg font-black text-gold-200 shrink-0">
+                {verifier.full_name
+                  .split(' ')
+                  .map((w) => w[0])
+                  .join('')
+                  .slice(0, 2)
+                  .toUpperCase()}
+              </div>
+            )}
+            <div>
+              <h3 className="text-xl font-extrabold text-white">{verifier.full_name}</h3>
+              <p className="text-xs font-semibold text-emerald-200">
+                {verifier.verifier_badge_title || `Accredited Field Verifier — ${verifier.district}`}
+              </p>
+              <p className="mt-0.5 text-xs text-emerald-100/80">
+                Coverage: <strong>{verifier.tehsil}, {verifier.district}</strong> · CNIC:{' '}
+                <span className="font-mono text-gold-300 font-bold">
+                  {maskCnic(verifier.cnic_number)}
+                </span>
+              </p>
+            </div>
           </div>
 
           <div className="inline-flex items-center gap-2 rounded-xl bg-white/10 border border-white/15 px-3 py-1.5 text-xs">

@@ -23,7 +23,7 @@ import type {
   WelfareCase,
 } from '@/types/amanat';
 import { PUNJAB_DISTRICTS } from '@/lib/seedData';
-import { formatPKR, cn } from '@/lib/utils';
+import { formatPKR, cn, maskCnic } from '@/lib/utils';
 import { Badge, Button, Card, Input, Select, Textarea } from './ui/primitives';
 import { DualProgressBar } from './DualProgressBar';
 import { LocationPinPicker, type GeoCoordinates } from './LocationPinPicker';
@@ -592,9 +592,51 @@ export function BeneficiaryWorkspace({
                       Vendor: <strong>{c.vendor_name}</strong> ({formatPKR(c.target_amount_pkr)})
                     </p>
                     {verifier && (
-                      <p className="text-teal-800 font-semibold">
-                        Assigned Verifier: {verifier.full_name} ({verifier.district})
-                      </p>
+                      <div className="mt-2 rounded-2xl border border-teal-200 bg-teal-50/70 p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-teal-800">
+                            Who Is Visiting You (Pre-Visit Safety Card)
+                          </span>
+                          {c.visit_handshake_pin && (
+                            <span className="rounded-lg bg-emerald-900 px-2.5 py-0.5 font-mono text-xs font-extrabold tracking-[0.2em] text-gold-300">
+                              PIN: {c.visit_handshake_pin}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {verifier.photo_url ? (
+                            <img
+                              src={verifier.photo_url}
+                              alt={verifier.full_name}
+                              className="h-12 w-12 rounded-xl object-cover border-2 border-teal-600 shrink-0"
+                            />
+                          ) : (
+                            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-900 text-gold-200 font-black text-sm shrink-0">
+                              {verifier.full_name
+                                .split(' ')
+                                .map((w) => w[0])
+                                .join('')
+                                .slice(0, 2)
+                                .toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0 text-[11px] space-y-0.5">
+                            <p className="font-extrabold text-emerald-950">{verifier.full_name}</p>
+                            <p className="text-slate-600">
+                              {verifier.tehsil}, {verifier.district} · CNIC:{' '}
+                              <span className="font-mono font-bold text-teal-900">
+                                {maskCnic(verifier.cnic_number)}
+                              </span>
+                            </p>
+                          </div>
+                        </div>
+                        {c.visit_handshake_pin && (
+                          <p className="text-[10px] text-teal-900 leading-relaxed">
+                            Match face &amp; scan their live 60s QR first, then share your secret
+                            4-digit Visit PIN ({c.visit_handshake_pin}). Never pay any cash or fee.
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
                   <DualProgressBar

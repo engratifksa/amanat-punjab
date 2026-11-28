@@ -413,7 +413,7 @@ export default function App() {
             currentUser={currentUser}
             profiles={profiles}
             onOpenAuth={() => setAuthModalRole('verifier')}
-            onApplyAsVerifier={async (district, tehsil) => {
+            onApplyAsVerifier={async ({ district, tehsil, cnic_number, phone, photo_url }) => {
               if (!currentUser) return;
               const prof = await dataClient.upsertUserProfile({
                 auth_user_id: currentUser.id,
@@ -421,6 +421,9 @@ export default function App() {
                 full_name: currentUser.full_name,
                 district,
                 tehsil,
+                cnic_number,
+                phone,
+                photo_url,
                 role: 'verifier',
                 applyAsVerifier: true,
               });
@@ -445,6 +448,7 @@ export default function App() {
           <AdminWorkspace
             campaigns={campaigns}
             cases={cases}
+            verifications={verifications}
             donations={donations}
             profiles={profiles}
             notifications={notifications}
@@ -579,6 +583,17 @@ export default function App() {
       <VerifierQrScannerModal
         isOpen={showVerifierScanner}
         profiles={profiles}
+        assignedCaseForUser={
+          currentUser
+            ? cases.find(
+                (c) =>
+                  c.assigned_verifier_id &&
+                  c.beneficiary_account_email?.toLowerCase() ===
+                    currentUser.email.trim().toLowerCase() &&
+                  c.status === 'pending_field_visit'
+              ) ?? null
+            : null
+        }
         onClose={() => setShowVerifierScanner(false)}
       />
 

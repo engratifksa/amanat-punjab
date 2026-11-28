@@ -11,6 +11,25 @@ export function getPublicAppUrl(): string {
   return DEFAULT_PUBLIC_APP_URL;
 }
 
+export function maskCnic(cnic?: string | null): string {
+  if (!cnic) return 'Not Provided';
+  const digits = cnic.replace(/\D/g, '');
+  if (digits.length >= 13) {
+    return `${digits.slice(0, 5)}-*******-${digits.slice(12, 13)}`;
+  }
+  if (digits.length >= 6) {
+    return `${digits.slice(0, 5)}-****-${digits.slice(-1)}`;
+  }
+  return cnic;
+}
+
+export function formatCnicInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 13);
+  if (digits.length <= 5) return digits;
+  if (digits.length <= 12) return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+  return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12)}`;
+}
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }

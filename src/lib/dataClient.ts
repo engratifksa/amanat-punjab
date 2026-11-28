@@ -39,6 +39,7 @@ import {
   type BuildMilestoneNotificationArgs,
 } from './notifications';
 import { generateQrSecretHex } from './dynamicQr';
+import { maskCnic } from './utils';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -268,6 +269,7 @@ export interface CreateVerificationInput {
   verifier_lat?: number | null;
   verifier_lng?: number | null;
   distance_from_applicant_km?: number | null;
+  handshake_pin_verified?: boolean;
   isOffline: boolean;
 }
 
@@ -833,10 +835,18 @@ export const dataClient = {
 
   async assignVerifierToCase(caseId: string, verifierId: string): Promise<void> {
     await ensureLocalSeeded();
+    const arr = new Uint32Array(1);
+    crypto.getRandomValues(arr);
+    const visitPin = String(1000 + (arr[0] % 9000));
+
     if (supabase) {
       await supabase
         .from('cases')
-        .update({ status: 'pending_field_visit', assigned_verifier_id: verifierId })
+        .update({
+          status: 'pending_field_visit',
+          assigned_verifier_id: verifierId,
+          visit_handshake_pin: visitPin,
+        })
         .eq('id', caseId);
       const { data: c } = await supabase.from('cases').select('*').eq('id', caseId).maybeSingle();
       const { data: v } = await supabase
@@ -848,6 +858,8 @@ export const dataClient = {
         const benEmails = (c as WelfareCase).beneficiary_account_email
           ? [(c as WelfareCase).beneficiary_account_email!]
           : [];
+        const verifierProfile = v as Profile | null;
+        const maskedCnic = maskCnic(verifierProfile?.cnic_number);
         await emitNotification(
           {
             event_type: 'case_submitted',
@@ -855,16 +867,15 @@ export const dataClient = {
             target_code: (c as WelfareCase).case_code,
             case_id: (c as WelfareCase).id,
             campaign_id: null,
-            title_en: `Field Verifier Assigned (${(c as WelfareCase).case_code}) — How to Verify Visitor`,
-            title_ur: `فیلڈ ویریفائر تفویض کر دیا گیا (${(c as WelfareCase).case_code}) — کیو آر تصدیق کا طریقہ`,
-            body_en: `Accredited Field Verifier ${(v as Profile | null)?.full_name ?? 'Local Volunteer'} (${(c as WelfareCase).district}) will visit your household. SAFETY GUIDE: Before sharing your CNIC, open Amanat → tap "Verify Verifier (Scan QR)" and scan their live 60-second QR ID Card (or enter their live 6-digit code). Never accept screenshots and NEVER pay any fee or cash.`,
-            body_ur: `مستند فیلڈ ویریفائر ${(v as Profile | null)?.full_name ?? 'مقامی رضاکار'} جلد آپ کے گھر کا دورہ کریں گے۔ حفاظتی ہدایت: اپنا شناختی کارڈ دکھانے سے پہلے امانت ایپ میں "Verify Verifier (Scan QR)" کھول کر ان کے فون پر موجود 60 سیکنڈ والا لائیو کیو آر کوڈ اسکین کریں۔ کبھی بھی اسکرین شاٹ قبول نہ کریں اور ہرگز کوئی فیس یا نقد رقم نہ دیں۔`,
+            title_en: `Field Verifier Assigned (${(c as WelfareCase).case_code}) — Visit PIN: ${visitPin}`,
+            title_ur: `فیلڈ ویریفائر تفویض کر دیا گیا (${(c as WelfareCase).case_code}) — خفیہ پن: ${visitPin}`,
+            body_en: `Accredited Field Verifier ${verifierProfile?.full_name ?? 'Local Volunteer'} (CNIC: ${maskedCnic}, ${(c as WelfareCase).district}) will visit your household. YOUR SECRET 4-DIGIT VISIT PIN: ${visitPin}. SAFETY GUIDE: Match the visitor's face to their photo in your Beneficiary Portal and scan their live 60-second QR ID Card FIRST. Share PIN ${visitPin} ONLY after confirming their identity. Never accept screenshots and NEVER pay any cash or fee.`,
+            body_ur: `مستند فیلڈ ویریفائر ${verifierProfile?.full_name ?? 'مقامی رضاکار'} (شناختی کارڈ: ${maskedCnic}) جلد آپ کے گھر کا دورہ کریں گے۔ آپ کا خفیہ 4 ہندسوں والا وزٹ پن: ${visitPin}۔ حفاظتی ہدایت: پہلے اپنے پورٹل میں ان کی تصویر میچ کریں اور 60 سیکنڈ والا لائیو کیو آر کوڈ اسکین کریں، پھر ہی یہ پن بتائیں۔ کبھی بھی اسکرین شاٹ قبول نہ کریں اور ہرگز کوئی نقد رقم یا فیس نہ دیں۔`,
             vendor_name: (c as WelfareCase).vendor_name,
             district: (c as WelfareCase).district,
           },
           benEmails
         );
-        const verifierProfile = v as Profile | null;
         if (verifierProfile?.email) {
           await emitNotification(
             {
@@ -919,11 +930,17 @@ export const dataClient = {
     role?: 'donor' | 'beneficiary' | 'verifier';
     district?: string;
     tehsil?: string;
+    phone?: string | null;
+    cnic_number?: string | null;
+    photo_url?: string | null;
     applyAsVerifier?: boolean;
   }): Promise<Profile> {
     await ensureLocalSeeded();
     const cleanEmail = input.email.trim().toLowerCase();
     const cleanName = input.full_name.trim() || cleanEmail.split('@')[0] || 'Amanat User';
+    const uploadedPhoto = input.photo_url
+      ? await uploadMediaToStorage(input.photo_url, 'verifier-photos')
+      : null;
 
     if (supabase) {
       // 1. Lookup by auth_user_id first, then email, then full_name
@@ -963,6 +980,9 @@ export const dataClient = {
           patch.verifier_applied = true;
           if (input.district) patch.district = input.district;
           if (input.tehsil) patch.tehsil = input.tehsil;
+          if (input.phone) patch.phone = input.phone;
+          if (input.cnic_number) patch.cnic_number = input.cnic_number;
+          if (uploadedPhoto) patch.photo_url = uploadedPhoto;
           if (!existing.is_accredited_verifier) {
             patch.verifier_badge_title = `Pending Admin Approval — ${input.district || existing.district}`;
           }
@@ -981,11 +1001,13 @@ export const dataClient = {
         auth_user_id: input.auth_user_id || null,
         email: cleanEmail,
         full_name: cleanName,
-        phone: cleanEmail,
+        phone: input.phone || cleanEmail,
         role: input.applyAsVerifier ? 'verifier' : input.role ?? 'donor',
         district: input.district || 'Lahore',
         tehsil: input.tehsil || 'Lahore City',
         cnic_hash: `google:${cleanEmail}`,
+        cnic_number: input.cnic_number || null,
+        photo_url: uploadedPhoto || null,
         is_accredited_verifier: false,
         verifier_applied: Boolean(input.applyAsVerifier),
         verifier_badge_title: input.applyAsVerifier
@@ -1060,6 +1082,8 @@ export const dataClient = {
 
   async submitFieldVerification(input: CreateVerificationInput): Promise<FieldVerification> {
     await ensureLocalSeeded();
+    const activeSettings = await getActiveSettings();
+    const isDemoMode = activeSettings.app_mode === 'training';
     const verification: FieldVerification = {
       id: generateId('ver'),
       case_id: input.case_id,
@@ -1072,8 +1096,10 @@ export const dataClient = {
       verifier_lat: input.verifier_lat ?? null,
       verifier_lng: input.verifier_lng ?? null,
       distance_from_applicant_km: input.distance_from_applicant_km ?? null,
+      handshake_pin_verified: Boolean(input.handshake_pin_verified),
       verified_at: new Date().toISOString(),
       synced: !input.isOffline,
+      is_demo: isDemoMode,
     };
 
     if (supabase && !input.isOffline) {
@@ -1087,6 +1113,11 @@ export const dataClient = {
           monthly_income_pkr: verification.monthly_income_pkr,
           evidence_urls: verification.evidence_urls,
           gps_tehsil_tag: verification.gps_tehsil_tag,
+          verifier_lat: verification.verifier_lat,
+          verifier_lng: verification.verifier_lng,
+          distance_from_applicant_km: verification.distance_from_applicant_km,
+          handshake_pin_verified: verification.handshake_pin_verified,
+          is_demo: isDemoMode,
         })
         .select()
         .single();

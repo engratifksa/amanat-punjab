@@ -11,19 +11,22 @@ import {
   CheckCircle2,
   AlertTriangle,
 } from 'lucide-react';
-import type { Profile } from '@/types/amanat';
+import type { Profile, WelfareCase } from '@/types/amanat';
 import { verifyDynamicVerifierInput, type VerifierScanResult } from '@/lib/dynamicQr';
+import { maskCnic } from '@/lib/utils';
 import { Badge, Button, Input } from './ui/primitives';
 
 interface VerifierQrScannerModalProps {
   isOpen: boolean;
   profiles: Profile[];
+  assignedCaseForUser?: WelfareCase | null;
   onClose: () => void;
 }
 
 export function VerifierQrScannerModal({
   isOpen,
   profiles,
+  assignedCaseForUser = null,
   onClose,
 }: VerifierQrScannerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -204,17 +207,52 @@ export function VerifierQrScannerModal({
                 )}
               </div>
               {result.valid && result.verifier && (
-                <div className="rounded-xl bg-white p-3 border border-emerald-200 text-xs space-y-1">
-                  <p className="text-sm font-extrabold text-emerald-950">
-                    {result.verifier.full_name}
-                  </p>
-                  <p className="text-slate-600">
-                    {result.verifier.verifier_badge_title} · {result.verifier.tehsil},{' '}
-                    {result.verifier.district}
-                  </p>
-                  <p className="font-mono text-[11px] text-emerald-800">
-                    Badge ID: {result.verifier.id}
-                  </p>
+                <div className="rounded-xl bg-white p-3 border border-emerald-200 text-xs space-y-2.5">
+                  <div className="flex items-center gap-3">
+                    {result.verifier.photo_url ? (
+                      <img
+                        src={result.verifier.photo_url}
+                        alt={result.verifier.full_name}
+                        className="h-14 w-14 rounded-xl object-cover border-2 border-emerald-600 shrink-0"
+                      />
+                    ) : (
+                      <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-emerald-900 text-gold-200 font-black text-base shrink-0">
+                        {result.verifier.full_name
+                          .split(' ')
+                          .map((w) => w[0])
+                          .join('')
+                          .slice(0, 2)
+                          .toUpperCase()}
+                      </div>
+                    )}
+                    <div className="min-w-0 space-y-0.5">
+                      <p className="text-sm font-extrabold text-emerald-950">
+                        {result.verifier.full_name}
+                      </p>
+                      <p className="text-slate-600">
+                        {result.verifier.verifier_badge_title} · {result.verifier.tehsil},{' '}
+                        {result.verifier.district}
+                      </p>
+                      <p className="font-mono text-[11px] font-bold text-emerald-800">
+                        CNIC: {maskCnic(result.verifier.cnic_number)} · ID: {result.verifier.id}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Case-Specific Assignment Check (when signed-in Beneficiary has an active case) */}
+                  {assignedCaseForUser && (
+                    <div
+                      className={`rounded-lg px-2.5 py-1.5 text-[11px] font-extrabold ${
+                        assignedCaseForUser.assigned_verifier_id === result.verifier.id
+                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                          : 'bg-amber-100 text-amber-950 border border-amber-300'
+                      }`}
+                    >
+                      {assignedCaseForUser.assigned_verifier_id === result.verifier.id
+                        ? `ASSIGNED TO YOUR CASE (${assignedCaseForUser.case_code}) — Safe to share your 4-digit Visit PIN!`
+                        : `CAUTION: Accredited Amanat Verifier, but NOT assigned to your active case (${assignedCaseForUser.case_code}).`}
+                    </div>
+                  )}
                 </div>
               )}
               <p className="text-xs font-semibold leading-relaxed">{result.messageEn}</p>
