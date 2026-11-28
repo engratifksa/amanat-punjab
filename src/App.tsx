@@ -333,6 +333,11 @@ export default function App() {
       />
 
       <main className="flex-1">
+        {settings.app_mode === 'training' && (
+          <div className="bg-gradient-to-r from-amber-500 via-gold-500 to-amber-500 text-emerald-950 px-4 py-2 text-center text-xs font-extrabold shadow-sm">
+            TRAINING / DEMO MODE ACTIVE — Viewing Sample Dummy Data Only · All Real Live Data Is Safely Isolated
+          </div>
+        )}
         {loading ? (
           <div className="flex h-[60vh] items-center justify-center text-sm font-bold text-emerald-900">
             Loading Amanat Escrow Ledger...
@@ -512,6 +517,22 @@ export default function App() {
             onFlushDummyData={async () => {
               await dataClient.flushAllDummyData();
               await refreshData();
+            }}
+            onSetAppMode={async (mode) => {
+              const saved = await dataClient.setAppMode(mode);
+              setSettings(saved);
+              await refreshData();
+            }}
+            onReseedTrainingData={async () => {
+              await dataClient.reseedTrainingData();
+              await refreshData();
+            }}
+            onExportRealBackup={() => dataClient.exportRealDataBackup()}
+            onPreviewBackupRestore={(bundle) => dataClient.previewBackupRestore(bundle)}
+            onRestoreRealBackup={async (bundle) => {
+              const res = await dataClient.restoreRealDataBackup(bundle);
+              await refreshData();
+              return res;
             }}
             onLogoutAdmin={handleLogoutAdmin}
           />

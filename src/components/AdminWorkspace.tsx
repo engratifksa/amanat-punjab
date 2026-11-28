@@ -25,15 +25,26 @@ import {
   Lock,
   Pencil,
   X,
+  Database,
+  Upload,
+  RefreshCw,
 } from 'lucide-react';
 import { VolunteerPostModal } from './VolunteerPostModal';
 import { TelegramGuideModal } from './TelegramGuideModal';
+import {
+  parseAndVerifyBackupJson,
+  triggerBackupDownload,
+  type AmanatBackupBundle,
+  type BackupRestorePreview,
+  type BackupRestoreResult,
+} from '@/lib/backupRestore';
 import {
   exportAllCampaignsCsv,
   exportFullAuditLedgerCsv,
   exportSingleCampaignCsv,
 } from '@/lib/csvExport';
 import type {
+  AppDataMode,
   AppSettings,
   CampaignCategory,
   CampaignStatus,
@@ -95,6 +106,11 @@ interface AdminWorkspaceProps {
   onDeleteDonation: (id: string) => Promise<void>;
   onDeleteProfile: (id: string) => Promise<void>;
   onFlushDummyData: () => Promise<void>;
+  onSetAppMode: (mode: AppDataMode) => Promise<void>;
+  onReseedTrainingData: () => Promise<void>;
+  onExportRealBackup: () => Promise<AmanatBackupBundle>;
+  onPreviewBackupRestore: (bundle: AmanatBackupBundle) => Promise<BackupRestorePreview>;
+  onRestoreRealBackup: (bundle: AmanatBackupBundle) => Promise<BackupRestoreResult>;
   onLogoutAdmin: () => void;
 }
 
@@ -122,6 +138,11 @@ export function AdminWorkspace({
   onDeleteDonation,
   onDeleteProfile,
   onFlushDummyData,
+  onSetAppMode,
+  onReseedTrainingData,
+  onExportRealBackup,
+  onPreviewBackupRestore,
+  onRestoreRealBackup,
   onLogoutAdmin,
 }: AdminWorkspaceProps) {
   const { t } = useTranslation();
@@ -207,6 +228,67 @@ export function AdminWorkspace({
   const [showTelegramGuide, setShowTelegramGuide] = useState(false);
   const [flushConfirmText, setFlushConfirmText] = useState('');
   const [flushing, setFlushing] = useState(false);
+  const [switchingMode, setSwitchingMode] = useState(false);
+  const [reseeding, setReseeding] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  const [pendingRestoreBundle, setPendingRestoreBundle] = useState<AmanatBackupBundle | null>(null);
+  const [restorePreview, setRestorePreview] = useState<BackupRestorePreview | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restoreConfirmText, setRestoreConfirmText] = useState('');
+  const [restoring, setRestoring] = useState(false);
+
+  const activeDataMode: AppDataMode = settings.app_mode === 'training' ? 'training' : 'real';
+
+  const handleDownloadBackup = async () => {
+    setBackingUp(true);
+    try {
+      const bundle = await onExportRealBackup();
+      triggerBackupDownload(bundle);
+      setNotice(
+        `Downloaded SHA-256 verified Real Data Backup (${bundle.counts.crowdfunding_campaigns} campaigns, ${bundle.counts.cases} cases, ${bundle.counts.donations} donations, ${bundle.counts.profiles} profiles).`
+      );
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
+  const handleSelectBackupFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setRestoreError(null);
+    setPendingRestoreBundle(null);
+    setRestorePreview(null);
+    setRestoreConfirmText('');
+    try {
+      const text = await file.text();
+      const { bundle } = await parseAndVerifyBackupJson(text);
+      const preview = await onPreviewBackupRestore(bundle);
+      setPendingRestoreBundle(bundle);
+      setRestorePreview(preview);
+    } catch (err) {
+      setRestoreError(err instanceof Error ? err.message : 'Failed to parse backup file.');
+    }
+  };
+
+  const handleExecuteRestore = async () => {
+    if (!pendingRestoreBundle || restoreConfirmText.trim() !== 'RESTORE LIVE DATA') return;
+    setRestoring(true);
+    setRestoreError(null);
+    try {
+      const res = await onRestoreRealBackup(pendingRestoreBundle);
+      setPendingRestoreBundle(null);
+      setRestorePreview(null);
+      setRestoreConfirmText('');
+      setNotice(
+        `Zero-Duplicate Restore complete! Synced ${res.restoredCounts.crowdfunding_campaigns} campaigns, ${res.restoredCounts.cases} cases, ${res.restoredCounts.donations} donations, and ${res.restoredCounts.profiles} profiles.`
+      );
+    } catch (err) {
+      setRestoreError(err instanceof Error ? err.message : 'Restore failed.');
+    } finally {
+      setRestoring(false);
+    }
+  };
 
   useEffect(() => {
     setDraftSettings(settings);
@@ -331,6 +413,60 @@ export function AdminWorkspace({
               <LogOut className="h-3 w-3" />
               Lock / Sign Out
             </button>
+
+            {/* 2-Stage Mode Switch: LIVE (Real Data) vs TRAINING (Dummy Mode) */}
+            <div
+              className="inline-flex items-center rounded-full bg-black/30 p-0.5 border border-white/15"
+              role="group"
+              aria-label="Data Mode Switch"
+            >
+              <button
+                type="button"
+                disabled={switchingMode}
+                onClick={async () => {
+                  if (activeDataMode === 'real') return;
+                  setSwitchingMode(true);
+                  try {
+                    await onSetAppMode('real');
+                    setNotice('Switched to LIVE (Real Data) Mode — dummy training data hidden.');
+                  } finally {
+                    setSwitchingMode(false);
+                  }
+                }}
+                className={cn(
+                  'rounded-full px-3 py-1 text-[11px] font-extrabold transition-all',
+                  activeDataMode === 'real'
+                    ? 'bg-emerald-500 text-white shadow'
+                    : 'text-emerald-200 hover:text-white'
+                )}
+              >
+                LIVE (Real)
+              </button>
+              <button
+                type="button"
+                disabled={switchingMode}
+                onClick={async () => {
+                  if (activeDataMode === 'training') return;
+                  setSwitchingMode(true);
+                  try {
+                    await onSetAppMode('training');
+                    setNotice(
+                      'Switched to TRAINING (Dummy Mode) — real live data is safely isolated.'
+                    );
+                  } finally {
+                    setSwitchingMode(false);
+                  }
+                }}
+                className={cn(
+                  'rounded-full px-3 py-1 text-[11px] font-extrabold transition-all',
+                  activeDataMode === 'training'
+                    ? 'bg-amber-400 text-emerald-950 shadow'
+                    : 'text-emerald-200 hover:text-white'
+                )}
+              >
+                TRAINING (Dummy)
+              </button>
+            </div>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold">{t('admin.title')}</h1>
           <p className="mt-1.5 max-w-2xl text-sm text-emerald-100/85">
@@ -1748,21 +1884,165 @@ export function AdminWorkspace({
             </Button>
           </div>
 
-          {/* Production Go-Live: Flush All Dummy / Seed Data */}
-          <Card className="p-6 border-rose-200 bg-rose-50/40 space-y-3">
-            <div className="flex items-start gap-2.5">
-              <AlertTriangle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
-              <div>
-                <h3 className="text-sm font-extrabold text-rose-950">
-                  Production Go-Live: Flush All Dummy / Seed Data
-                </h3>
-                <p className="text-xs text-rose-900/85 mt-0.5">
-                  Permanently deletes all sample campaigns, sample cases, sample verifiers, and
-                  demo donations from Supabase so your platform starts 100% clean for real Zakat
-                  funding. Your Admin Settings, Social Links, Escrow Accounts, and real Google
-                  users are preserved.
-                </p>
+          {/* Enterprise Backup & Zero-Duplicate Restore (Real Data Only) */}
+          <Card className="p-6 border-emerald-900/15 bg-gradient-to-br from-emerald-50/70 via-white to-slate-50 space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <Database className="h-5 w-5 text-emerald-700 shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-sm font-extrabold text-emerald-950">
+                    Database Backup &amp; Zero-Duplicate Restore (Real Data Only)
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    Exports strictly <strong>Real Live Data</strong> (excluding all dummy training
+                    records) with a <strong>SHA-256 integrity checksum</strong>. Restore uses
+                    foreign-key-safe UPSERT matching IDs &amp; unique codes so zero duplicates are
+                    ever created.
+                  </p>
+                </div>
               </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="md"
+                  disabled={backingUp}
+                  onClick={handleDownloadBackup}
+                >
+                  <Download className="h-4 w-4" />
+                  <span>{backingUp ? 'Exporting...' : 'Download Live Backup (.json)'}</span>
+                </Button>
+
+                <label className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-900/20 bg-white px-3.5 py-2 text-xs font-extrabold text-emerald-900 hover:bg-emerald-50 cursor-pointer shadow-sm transition-colors">
+                  <Upload className="h-4 w-4 text-emerald-700" />
+                  <span>Restore From Backup (.json)</span>
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={handleSelectBackupFile}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            </div>
+
+            {restoreError && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-bold text-rose-800">
+                {restoreError}
+              </div>
+            )}
+
+            {restorePreview && pendingRestoreBundle && (
+              <div className="rounded-2xl border border-emerald-300 bg-white p-4 space-y-3 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="emerald">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      SHA-256 Checksum Verified
+                    </Badge>
+                    <span className="text-xs font-semibold text-slate-600">
+                      Backup from {new Date(restorePreview.exportedAt).toLocaleString('en-GB')}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingRestoreBundle(null);
+                      setRestorePreview(null);
+                      setRestoreConfirmText('');
+                    }}
+                    className="text-xs font-bold text-slate-500 hover:text-slate-800"
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
+                  {(
+                    [
+                      ['Campaigns', restorePreview.tables.crowdfunding_campaigns],
+                      ['Cases', restorePreview.tables.cases],
+                      ['Donations', restorePreview.tables.donations],
+                      ['Profiles', restorePreview.tables.profiles],
+                      ['Field Visits', restorePreview.tables.field_verifications],
+                      ['Alerts', restorePreview.tables.notifications],
+                    ] as const
+                  ).map(([label, diff]) => (
+                    <div
+                      key={label}
+                      className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 space-y-0.5"
+                    >
+                      <p className="font-extrabold text-emerald-950">{label}</p>
+                      <p className="text-[11px] text-emerald-700 font-bold">
+                        +{diff.newCount} New
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        {diff.existingCount} Upsert (No Dup)
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <Input
+                    value={restoreConfirmText}
+                    onChange={(e) => setRestoreConfirmText(e.target.value)}
+                    placeholder='Type "RESTORE LIVE DATA" to confirm zero-duplicate restore'
+                    className="font-mono border-emerald-300"
+                  />
+                  <Button
+                    type="button"
+                    variant="gold"
+                    size="md"
+                    disabled={restoring || restoreConfirmText.trim() !== 'RESTORE LIVE DATA'}
+                    onClick={handleExecuteRestore}
+                    className="shrink-0"
+                  >
+                    <Upload className="h-4 w-4" />
+                    <span>{restoring ? 'Restoring...' : 'Confirm & Restore'}</span>
+                  </Button>
+                </div>
+              </div>
+            )}
+          </Card>
+
+          {/* Production Go-Live: Flush / Re-Seed Dummy Training Data Only */}
+          <Card className="p-6 border-rose-200 bg-rose-50/40 space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5 max-w-2xl">
+                <AlertTriangle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-sm font-extrabold text-rose-950">
+                    Training / Dummy Data Controls (100% Isolated From Real Data)
+                  </h3>
+                  <p className="text-xs text-rose-900/85 mt-0.5">
+                    Flushing deletes <strong>strictly dummy/training rows</strong> (<code>is_demo = true</code>)
+                    and <strong>never touches a single Real Live record</strong>. You can also
+                    re-seed sample training data anytime for team onboarding.
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={reseeding}
+                onClick={async () => {
+                  setReseeding(true);
+                  try {
+                    await onReseedTrainingData();
+                    setNotice(
+                      'Sample Training Data re-seeded cleanly (is_demo = true). Switch to TRAINING mode to view it.'
+                    );
+                  } finally {
+                    setReseeding(false);
+                  }
+                }}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                <span>{reseeding ? 'Seeding...' : 'Re-Seed Training Data'}</span>
+              </Button>
             </div>
             <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
               <Input

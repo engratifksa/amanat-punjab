@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type {
+  AppDataMode,
   Profile,
   CrowdfundingCampaign,
   WelfareCase,
@@ -15,6 +16,12 @@ import type {
   NotificationRecord,
   NotificationSubscription,
 } from '@/types/amanat';
+import {
+  buildBackupBundle,
+  type AmanatBackupBundle,
+  type BackupRestorePreview,
+  type BackupRestoreResult,
+} from './backupRestore';
 import {
   SEED_PROFILES,
   SEED_CAMPAIGNS,
@@ -442,18 +449,34 @@ export const dataClient = {
             .limit(40),
         ]);
       const defaultHash = await hashAdminPassword(DEFAULT_INITIAL_PASSWORD);
-      const settings =
+      const rawSettings =
         (settingsRes.data as AppSettings | null) ?? {
           ...DEFAULT_APP_SETTINGS,
           admin_password_hash: defaultHash,
         };
+      const activeMode: AppDataMode = rawSettings.app_mode === 'training' ? 'training' : 'real';
+      const settings: AppSettings = { ...rawSettings, app_mode: activeMode };
+      const wantDemo = activeMode === 'training';
+
+      const allProfiles = (profilesRes.data ?? []) as Profile[];
+      const allCampaigns = (campsRes.data ?? []) as CrowdfundingCampaign[];
+      const allCases = (casesRes.data ?? []) as WelfareCase[];
+      const allVerifications = (verRes.data ?? []) as FieldVerification[];
+      const allDonations = (donRes.data ?? []) as Donation[];
+      const allNotifications = (notifRes.data ?? []) as Array<
+        NotificationRecord & { is_demo?: boolean }
+      >;
+
       return {
-        profiles: (profilesRes.data ?? []) as Profile[],
-        campaigns: (campsRes.data ?? []) as CrowdfundingCampaign[],
-        cases: (casesRes.data ?? []) as WelfareCase[],
-        verifications: (verRes.data ?? []) as FieldVerification[],
-        donations: (donRes.data ?? []) as Donation[],
-        notifications: (notifRes.data ?? []) as NotificationRecord[],
+        // In training mode, include real signed-in auth profiles too so Admin/Users can test roles seamlessly
+        profiles: wantDemo
+          ? allProfiles.filter((p) => Boolean(p.is_demo) || Boolean(p.auth_user_id))
+          : allProfiles.filter((p) => !p.is_demo),
+        campaigns: allCampaigns.filter((c) => Boolean(c.is_demo) === wantDemo),
+        cases: allCases.filter((c) => Boolean(c.is_demo) === wantDemo),
+        verifications: allVerifications.filter((v) => Boolean(v.is_demo) === wantDemo),
+        donations: allDonations.filter((d) => Boolean(d.is_demo) === wantDemo),
+        notifications: allNotifications.filter((n) => Boolean(n.is_demo) === wantDemo),
         settings,
       };
     }
@@ -470,12 +493,25 @@ export const dataClient = {
       ]);
 
     const defaultHash = await hashAdminPassword(DEFAULT_INITIAL_PASSWORD);
-    const settings: AppSettings = savedSettings ?? {
+    const rawSettings: AppSettings = savedSettings ?? {
       ...DEFAULT_APP_SETTINGS,
       admin_password_hash: defaultHash,
     };
+    const activeMode: AppDataMode = rawSettings.app_mode === 'training' ? 'training' : 'real';
+    const settings: AppSettings = { ...rawSettings, app_mode: activeMode };
+    const wantDemo = activeMode === 'training';
 
-    return { profiles, campaigns, cases, verifications, donations, notifications, settings };
+    return {
+      profiles: wantDemo
+        ? profiles.filter((p) => Boolean(p.is_demo) || Boolean(p.auth_user_id))
+        : profiles.filter((p) => !p.is_demo),
+      campaigns: campaigns.filter((c) => Boolean(c.is_demo) === wantDemo),
+      cases: cases.filter((c) => Boolean(c.is_demo) === wantDemo),
+      verifications: verifications.filter((v) => Boolean(v.is_demo) === wantDemo),
+      donations: donations.filter((d) => Boolean(d.is_demo) === wantDemo),
+      notifications,
+      settings,
+    };
   },
 
   async markNotificationRead(id: string): Promise<void> {
@@ -553,6 +589,9 @@ export const dataClient = {
         ? input.vendor_invoice_url
         : makeInvoiceDataUrl(input.title_en, input.vendor_name, input.target_amount_pkr, `INV-${code}`);
 
+    const activeSettings = await getActiveSettings();
+    const isDemoMode = activeSettings.app_mode === 'training';
+
     const campaign: CrowdfundingCampaign = {
       id: generateId('camp'),
       campaign_code: code,
@@ -573,6 +612,7 @@ export const dataClient = {
       deadline_date: input.deadline_date,
       status: 'active',
       created_at: new Date().toISOString(),
+      is_demo: isDemoMode,
     };
 
     if (supabase) {
@@ -722,6 +762,9 @@ export const dataClient = {
             `INV-${caseCode}`
           );
 
+    const activeSettings = await getActiveSettings();
+    const isDemoMode = activeSettings.app_mode === 'training';
+
     const newCase: WelfareCase = {
       id: generateId('case'),
       case_code: caseCode,
@@ -735,7 +778,7 @@ export const dataClient = {
       raised_amount_pkr: 0,
       pledged_amount_pkr: 0,
       status: 'pending_admin_review',
-      beneficiary_id: 'prof-ben-1',
+      beneficiary_id: null,
       assigned_verifier_id: null,
       vendor_name: input.vendor_name.trim(),
       vendor_type: input.vendor_type.trim() || 'Verified Vendor',
@@ -749,6 +792,7 @@ export const dataClient = {
       beneficiary_lng: input.beneficiary_lng ?? null,
       beneficiary_address_note: input.beneficiary_address_note?.trim(),
       beneficiary_account_email: input.beneficiary_account_email?.trim(),
+      is_demo: isDemoMode,
     };
 
     if (supabase) {
@@ -1502,43 +1546,311 @@ export const dataClient = {
     await localDb.profiles.delete(id);
   },
 
+  async setAppMode(mode: AppDataMode): Promise<AppSettings> {
+    const current = await getActiveSettings();
+    const updated: AppSettings = {
+      ...current,
+      app_mode: mode,
+      updated_at: new Date().toISOString(),
+    };
+    if (supabase) {
+      const { error } = await supabase.from('app_settings').upsert(updated, { onConflict: 'id' });
+      if (error) throw error;
+    }
+    await localDb.app_settings.put(updated);
+    return updated;
+  },
+
   async flushAllDummyData(): Promise<void> {
     await ensureLocalSeeded();
-    const dummyCampIds = ['camp-1', 'camp-2', 'camp-3'];
-    const dummyCaseIds = [
-      'case-1',
-      'case-2',
-      'case-3',
-      'case-4',
-      'case-5',
-      'case-6',
-      'case-7',
-      'case-8',
-    ];
-    const dummyProfIds = ['prof-ver-1', 'prof-ver-2', 'prof-ver-3', 'prof-ver-4', 'prof-ben-1'];
-    const dummyDonIds = ['don-1', 'don-2', 'don-3'];
-
     if (supabase) {
-      await supabase.from('donations').delete().in('id', dummyDonIds);
-      await supabase.from('donations').delete().in('campaign_id', dummyCampIds);
-      await supabase.from('donations').delete().in('case_id', dummyCaseIds);
-      await supabase.from('field_verifications').delete().in('case_id', dummyCaseIds);
-      await supabase.from('cases').delete().in('id', dummyCaseIds);
-      await supabase.from('crowdfunding_campaigns').delete().in('id', dummyCampIds);
-      await supabase.from('profiles').delete().in('id', dummyProfIds);
-      await supabase.from('notifications').delete().in('campaign_id', dummyCampIds);
+      // Strictly delete ONLY is_demo = true rows — Real Data (is_demo = false) is 100% untouched!
+      await supabase.from('donations').delete().eq('is_demo', true);
+      await supabase.from('field_verifications').delete().eq('is_demo', true);
+      await supabase.from('notifications').delete().eq('is_demo', true);
+      await supabase.from('cases').delete().eq('is_demo', true);
+      await supabase.from('crowdfunding_campaigns').delete().eq('is_demo', true);
+      await supabase.from('profiles').delete().eq('is_demo', true);
       return;
     }
 
-    await localDb.donations.bulkDelete(dummyDonIds);
-    await localDb.cases.bulkDelete(dummyCaseIds);
-    await localDb.crowdfunding_campaigns.bulkDelete(dummyCampIds);
-    await localDb.profiles.bulkDelete(dummyProfIds);
-    await localDb.notifications.clear();
+    const demoDons = (await localDb.donations.toArray()).filter((x) => x.is_demo).map((x) => x.id);
+    const demoVers = (await localDb.field_verifications.toArray()).filter((x) => x.is_demo).map((x) => x.id);
+    const demoCases = (await localDb.cases.toArray()).filter((x) => x.is_demo).map((x) => x.id);
+    const demoCamps = (await localDb.crowdfunding_campaigns.toArray()).filter((x) => x.is_demo).map((x) => x.id);
+    const demoProfs = (await localDb.profiles.toArray()).filter((x) => x.is_demo).map((x) => x.id);
+
+    await localDb.donations.bulkDelete(demoDons);
+    await localDb.field_verifications.bulkDelete(demoVers);
+    await localDb.cases.bulkDelete(demoCases);
+    await localDb.crowdfunding_campaigns.bulkDelete(demoCamps);
+    await localDb.profiles.bulkDelete(demoProfs);
+  },
+
+  async reseedTrainingData(): Promise<void> {
+    await ensureLocalSeeded();
+    const demoProfiles = SEED_PROFILES.map((p) => ({ ...p, is_demo: true }));
+    const demoCampaigns = SEED_CAMPAIGNS.map((c) => ({ ...c, is_demo: true }));
+    const demoCases = SEED_CASES.map((c) => ({ ...c, is_demo: true }));
+    const demoVerifications = SEED_VERIFICATIONS.map((v) => ({ ...v, is_demo: true }));
+    const demoDonations = SEED_DONATIONS.map((d) => ({ ...d, is_demo: true }));
+
+    if (supabase) {
+      await supabase.from('profiles').upsert(demoProfiles, { onConflict: 'id' });
+      await supabase.from('crowdfunding_campaigns').upsert(demoCampaigns, { onConflict: 'id' });
+      await supabase.from('cases').upsert(demoCases, { onConflict: 'id' });
+      await supabase.from('field_verifications').upsert(demoVerifications, { onConflict: 'id' });
+      await supabase.from('donations').upsert(demoDonations, { onConflict: 'id' });
+      return;
+    }
+
+    await localDb.profiles.bulkPut(demoProfiles);
+    await localDb.crowdfunding_campaigns.bulkPut(demoCampaigns);
+    await localDb.cases.bulkPut(demoCases);
+    await localDb.field_verifications.bulkPut(demoVerifications);
+    await localDb.donations.bulkPut(demoDonations);
+  },
+
+  async exportRealDataBackup(): Promise<AmanatBackupBundle> {
+    await ensureLocalSeeded();
+    if (supabase) {
+      const [settingsRes, profRes, campRes, caseRes, verRes, donRes, subRes, notifRes] =
+        await Promise.all([
+          supabase.from('app_settings').select('*').eq('id', 'global').maybeSingle(),
+          supabase.from('profiles').select('*').eq('is_demo', false),
+          supabase.from('crowdfunding_campaigns').select('*').eq('is_demo', false),
+          supabase.from('cases').select('*').eq('is_demo', false),
+          supabase.from('field_verifications').select('*').eq('is_demo', false),
+          supabase.from('donations').select('*').eq('is_demo', false),
+          supabase.from('notification_subscriptions').select('*'),
+          supabase.from('notifications').select('*').eq('is_demo', false),
+        ]);
+
+      return buildBackupBundle({
+        app_settings: (settingsRes.data as AppSettings | null) ?? null,
+        profiles: (profRes.data ?? []) as Profile[],
+        crowdfunding_campaigns: (campRes.data ?? []) as CrowdfundingCampaign[],
+        cases: (caseRes.data ?? []) as WelfareCase[],
+        field_verifications: (verRes.data ?? []) as FieldVerification[],
+        donations: (donRes.data ?? []) as Donation[],
+        notification_subscriptions: (subRes.data ?? []) as NotificationSubscription[],
+        notifications: (notifRes.data ?? []) as NotificationRecord[],
+      });
+    }
+
+    const [settings, profiles, campaigns, cases, verifications, donations, subs, notifications] =
+      await Promise.all([
+        localDb.app_settings.get('global'),
+        localDb.profiles.toArray(),
+        localDb.crowdfunding_campaigns.toArray(),
+        localDb.cases.toArray(),
+        localDb.field_verifications.toArray(),
+        localDb.donations.toArray(),
+        localDb.notification_subscriptions.toArray(),
+        localDb.notifications.toArray(),
+      ]);
+
+    return buildBackupBundle({
+      app_settings: settings ?? null,
+      profiles: profiles.filter((r) => !r.is_demo),
+      crowdfunding_campaigns: campaigns.filter((r) => !r.is_demo),
+      cases: cases.filter((r) => !r.is_demo),
+      field_verifications: verifications.filter((r) => !r.is_demo),
+      donations: donations.filter((r) => !r.is_demo),
+      notification_subscriptions: subs,
+      notifications,
+    });
+  },
+
+  async previewBackupRestore(bundle: AmanatBackupBundle): Promise<BackupRestorePreview> {
+    const current = await this.exportRealDataBackup();
+
+    const diffByKeys = <T extends { id: string }>(
+      incoming: T[],
+      existing: T[],
+      extraKey?: (item: T) => string | null | undefined
+    ) => {
+      const existingIds = new Set(existing.map((e) => e.id));
+      const existingAlt = new Set(
+        existing
+          .map((e) => (extraKey ? extraKey(e)?.toLowerCase() : null))
+          .filter(Boolean) as string[]
+      );
+      let existingCount = 0;
+      let newCount = 0;
+      for (const item of incoming) {
+        const alt = extraKey ? extraKey(item)?.toLowerCase() : null;
+        if (existingIds.has(item.id) || (alt && existingAlt.has(alt))) {
+          existingCount += 1;
+        } else {
+          newCount += 1;
+        }
+      }
+      return { totalInBackup: incoming.length, newCount, existingCount };
+    };
+
+    return {
+      exportedAt: bundle.exported_at,
+      checksumVerified: true,
+      hasSettings: Boolean(bundle.data.app_settings),
+      tables: {
+        profiles: diffByKeys(bundle.data.profiles, current.data.profiles, (p) => p.email),
+        crowdfunding_campaigns: diffByKeys(
+          bundle.data.crowdfunding_campaigns,
+          current.data.crowdfunding_campaigns,
+          (c) => c.campaign_code
+        ),
+        cases: diffByKeys(bundle.data.cases, current.data.cases, (c) => c.case_code),
+        field_verifications: diffByKeys(
+          bundle.data.field_verifications,
+          current.data.field_verifications
+        ),
+        donations: diffByKeys(
+          bundle.data.donations,
+          current.data.donations,
+          (d) => d.receipt_qr_hash
+        ),
+        notifications: diffByKeys(bundle.data.notifications, current.data.notifications),
+      },
+    };
+  },
+
+  async restoreRealDataBackup(bundle: AmanatBackupBundle): Promise<BackupRestoreResult> {
+    await ensureLocalSeeded();
+    const d = bundle.data;
+
+    // Normalize every restored row as strictly Real Data (is_demo = false)
+    const profiles = d.profiles.map((r) => ({ ...r, is_demo: false }));
+    const campaigns = d.crowdfunding_campaigns.map((r) => ({ ...r, is_demo: false }));
+    const cases = d.cases.map((r) => ({ ...r, is_demo: false }));
+    const verifications = d.field_verifications.map((r) => ({ ...r, is_demo: false }));
+    const donations = d.donations.map((r) => ({ ...r, is_demo: false }));
+    const subs = d.notification_subscriptions ?? [];
+    const notifications = d.notifications.map((r) => ({ ...r, is_demo: false }));
+
+    if (supabase) {
+      // Deduplicate against secondary unique keys before upserting so zero duplicates ever occur
+      const { data: existingCamps } = await supabase
+        .from('crowdfunding_campaigns')
+        .select('id, campaign_code');
+      const campCodeToId = new Map<string, string>(
+        ((existingCamps ?? []) as Array<{ id: string; campaign_code: string }>).map((x) => [
+          x.campaign_code.toLowerCase(),
+          x.id,
+        ])
+      );
+      const dedupCampaigns = campaigns.map((c) => {
+        const existingId = campCodeToId.get(c.campaign_code.toLowerCase());
+        return existingId && existingId !== c.id ? { ...c, id: existingId } : c;
+      });
+
+      const { data: existingCases } = await supabase.from('cases').select('id, case_code');
+      const caseCodeToId = new Map<string, string>(
+        ((existingCases ?? []) as Array<{ id: string; case_code: string }>).map((x) => [
+          x.case_code.toLowerCase(),
+          x.id,
+        ])
+      );
+      const dedupCases = cases.map((c) => {
+        const existingId = caseCodeToId.get(c.case_code.toLowerCase());
+        return existingId && existingId !== c.id ? { ...c, id: existingId } : c;
+      });
+
+      const { data: existingDons } = await supabase
+        .from('donations')
+        .select('id, receipt_qr_hash');
+      const qrToId = new Map<string, string>(
+        ((existingDons ?? []) as Array<{ id: string; receipt_qr_hash: string }>).map((x) => [
+          x.receipt_qr_hash.toLowerCase(),
+          x.id,
+        ])
+      );
+      const dedupDonations = donations.map((don) => {
+        const existingId = qrToId.get(don.receipt_qr_hash.toLowerCase());
+        return existingId && existingId !== don.id ? { ...don, id: existingId } : don;
+      });
+
+      // Strict FK-safe upsert order
+      if (d.app_settings) {
+        const { error } = await supabase
+          .from('app_settings')
+          .upsert({ ...d.app_settings, id: 'global' }, { onConflict: 'id' });
+        if (error) throw error;
+      }
+      if (profiles.length > 0) {
+        const { error } = await supabase.from('profiles').upsert(profiles, { onConflict: 'id' });
+        if (error) throw error;
+      }
+      if (dedupCampaigns.length > 0) {
+        const { error } = await supabase
+          .from('crowdfunding_campaigns')
+          .upsert(dedupCampaigns, { onConflict: 'id' });
+        if (error) throw error;
+      }
+      if (dedupCases.length > 0) {
+        const { error } = await supabase.from('cases').upsert(dedupCases, { onConflict: 'id' });
+        if (error) throw error;
+      }
+      if (verifications.length > 0) {
+        const { error } = await supabase
+          .from('field_verifications')
+          .upsert(verifications, { onConflict: 'id' });
+        if (error) throw error;
+      }
+      if (dedupDonations.length > 0) {
+        const { error } = await supabase
+          .from('donations')
+          .upsert(dedupDonations, { onConflict: 'id' });
+        if (error) throw error;
+      }
+      if (subs.length > 0) {
+        await supabase.from('notification_subscriptions').upsert(subs, { onConflict: 'id' });
+      }
+      if (notifications.length > 0) {
+        await supabase.from('notifications').upsert(notifications, { onConflict: 'id' });
+      }
+
+      return {
+        restoredCounts: {
+          profiles: profiles.length,
+          crowdfunding_campaigns: dedupCampaigns.length,
+          cases: dedupCases.length,
+          field_verifications: verifications.length,
+          donations: dedupDonations.length,
+          notification_subscriptions: subs.length,
+          notifications: notifications.length,
+        },
+        settingsRestored: Boolean(d.app_settings),
+      };
+    }
+
+    if (d.app_settings) await localDb.app_settings.put({ ...d.app_settings, id: 'global' });
+    if (profiles.length > 0) await localDb.profiles.bulkPut(profiles);
+    if (campaigns.length > 0) await localDb.crowdfunding_campaigns.bulkPut(campaigns);
+    if (cases.length > 0) await localDb.cases.bulkPut(cases);
+    if (verifications.length > 0) await localDb.field_verifications.bulkPut(verifications);
+    if (donations.length > 0) await localDb.donations.bulkPut(donations);
+    if (subs.length > 0) await localDb.notification_subscriptions.bulkPut(subs);
+    if (notifications.length > 0) await localDb.notifications.bulkPut(notifications);
+
+    return {
+      restoredCounts: {
+        profiles: profiles.length,
+        crowdfunding_campaigns: campaigns.length,
+        cases: cases.length,
+        field_verifications: verifications.length,
+        donations: donations.length,
+        notification_subscriptions: subs.length,
+        notifications: notifications.length,
+      },
+      settingsRestored: Boolean(d.app_settings),
+    };
   },
 
   async submitDonationPledge(input: CreateDonationInput): Promise<Donation> {
     await ensureLocalSeeded();
+    const activeSettings = await getActiveSettings();
+    const isDemoMode = activeSettings.app_mode === 'training';
     const uploadedProof = await uploadMediaToStorage(input.payment_proof_url, 'payment-proofs');
     const donation: Donation = {
       id: generateId('don'),
@@ -1553,6 +1865,7 @@ export const dataClient = {
       status: 'pledged_pending_verify',
       receipt_qr_hash: generateReceiptHash(input.target_code),
       created_at: new Date().toISOString(),
+      is_demo: isDemoMode,
     };
 
     if (supabase) {

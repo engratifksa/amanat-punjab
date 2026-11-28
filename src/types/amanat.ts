@@ -1,5 +1,7 @@
 export type UserRole = 'donor' | 'beneficiary' | 'verifier' | 'admin';
 
+export type AppDataMode = 'real' | 'training';
+
 export type CampaignCategory =
   | 'daughter_marriage'
   | 'health'
@@ -60,6 +62,7 @@ export interface Profile {
   verifier_applied?: boolean;
   verifier_badge_title: string | null;
   verifier_qr_secret?: string | null;
+  is_demo?: boolean;
 }
 
 export interface CrowdfundingCampaign {
@@ -82,6 +85,7 @@ export interface CrowdfundingCampaign {
   deadline_date: string;
   status: CampaignStatus;
   created_at: string;
+  is_demo?: boolean;
 }
 
 export interface WelfareCase {
@@ -113,6 +117,7 @@ export interface WelfareCase {
   beneficiary_address_note?: string;
   beneficiary_account_email?: string;
   rejection_reason?: string | null;
+  is_demo?: boolean;
 }
 
 export interface FieldVerification {
@@ -129,6 +134,7 @@ export interface FieldVerification {
   distance_from_applicant_km?: number | null;
   verified_at: string;
   synced?: boolean;
+  is_demo?: boolean;
 }
 
 export interface Donation {
@@ -146,6 +152,7 @@ export interface Donation {
   created_at: string;
   donor_note?: string;
   rejection_reason?: string | null;
+  is_demo?: boolean;
 }
 
 export interface AuthUserSession {
@@ -214,6 +221,7 @@ export interface EmailGatewayConfig {
 
 export interface AppSettings {
   id: 'global';
+  app_mode?: AppDataMode;
   social_links: SocialLinks;
   escrow_accounts: EscrowAccounts;
   telegram_config: TelegramSecurityConfig;
