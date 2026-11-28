@@ -132,7 +132,7 @@ export function UserAuthModal({
                 ? 'Optional for donors — unlocks your personal Zakat & Receipt Dashboard.'
                 : role === 'beneficiary'
                 ? 'Instant sign-up (no approval wait) to submit confidential requests.'
-                : 'Field Verifiers sign in via Google and require Admin Board approval.'}
+                : 'Sign in first, then submit your Portrait Photo & 13-digit CNIC for Admin approval.'}
             </p>
           </div>
           <button

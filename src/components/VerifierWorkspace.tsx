@@ -107,7 +107,13 @@ export function VerifierWorkspace({
 
   const isAccredited = Boolean(verifierProfile?.is_accredited_verifier);
   const hasApplied = Boolean(
-    verifierProfile && (verifierProfile.verifier_applied || verifierProfile.role === 'verifier')
+    verifierProfile &&
+      verifierProfile.verifier_applied &&
+      verifierProfile.cnic_number &&
+      verifierProfile.photo_url
+  );
+  const missingCardCredentials = Boolean(
+    isAccredited && verifierProfile && (!verifierProfile.photo_url || !verifierProfile.cnic_number)
   );
 
   // Gate 1: Only ask to Sign In if completely logged out
@@ -354,6 +360,70 @@ export function VerifierWorkspace({
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 space-y-6">
       {/* Live Anti-Scam 60-Second Dynamic Field Verifier Digital ID Card */}
       {verifierProfile && <VerifierDynamicIdCard verifier={verifierProfile} />}
+
+      {/* Prompt existing accredited verifiers missing Photo or CNIC to complete their ID Card */}
+      {missingCardCredentials && verifierProfile && (
+        <Card className="p-5 border-amber-300 bg-amber-50/70 space-y-3">
+          <div className="space-y-1">
+            <h3 className="text-sm font-extrabold text-amber-950">
+              Complete Your Official Verifier ID Card (Add Portrait Photo &amp; CNIC)
+            </h3>
+            <p className="text-xs text-amber-900">
+              Your profile was accredited before Portrait Photo &amp; CNIC were required. Add them
+              now so families see your official face photo and masked CNIC when scanning your QR.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Input
+              value={applyCnic}
+              onChange={(e) => setApplyCnic(formatCnicInput(e.target.value))}
+              placeholder="13-digit CNIC (35202-1234567-1)"
+              className="font-mono bg-white"
+            />
+            <Input
+              value={applyPhone}
+              onChange={(e) => setApplyPhone(e.target.value)}
+              placeholder="Mobile Number (0300-1234567)"
+              className="bg-white"
+            />
+          </div>
+          <SmartImageCapture
+            label="Official Portrait Photo *"
+            value={applyPhoto}
+            onChange={setApplyPhoto}
+          />
+          {applyError && (
+            <p className="text-xs font-bold text-rose-700">{applyError}</p>
+          )}
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            disabled={applying}
+            onClick={async () => {
+              setApplyError(null);
+              if (applyCnic.replace(/\D/g, '').length < 13 || !applyPhoto) {
+                setApplyError('Please enter a valid 13-digit CNIC and upload your portrait photo.');
+                return;
+              }
+              setApplying(true);
+              try {
+                await onApplyAsVerifier({
+                  district: verifierProfile.district,
+                  tehsil: verifierProfile.tehsil,
+                  cnic_number: applyCnic,
+                  phone: applyPhone.trim() || verifierProfile.phone,
+                  photo_url: applyPhoto,
+                });
+              } finally {
+                setApplying(false);
+              }
+            }}
+          >
+            {applying ? 'Saving...' : 'Save Photo & CNIC to My Official ID Card'}
+          </Button>
+        </Card>
+      )}
 
       {/* Header Banner */}
       <div className="rounded-3xl bg-emerald-950 p-6 sm:p-8 text-white shadow-glass-lg flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

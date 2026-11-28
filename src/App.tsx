@@ -157,7 +157,7 @@ export default function App() {
         role: pending.role,
         district: pending.district,
         tehsil: pending.tehsil,
-        applyAsVerifier: pending.role === 'verifier',
+        applyAsVerifier: false,
       });
       await refreshData();
 
@@ -249,7 +249,7 @@ export default function App() {
       role: session.role,
       district: session.district,
       tehsil: session.tehsil,
-      applyAsVerifier: session.role === 'verifier',
+      applyAsVerifier: false,
     });
     const enriched: AuthUserSession = {
       ...session,
