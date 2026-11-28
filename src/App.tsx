@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
+  AdminAuditLog,
+  AdminOfficer,
+  AdminSessionInfo,
   AppSettings,
   AuthUserSession,
   CrowdfundingCampaign,
@@ -14,7 +17,7 @@ import type {
 } from '@/types/amanat';
 import { dataClient, supabase } from '@/lib/dataClient';
 import { DEFAULT_APP_SETTINGS } from '@/lib/seedData';
-import { clearAdminSession, hasValidAdminSession } from '@/lib/adminAuth';
+import { clearAdminSession, getAdminSession, hasValidAdminSession } from '@/lib/adminAuth';
 import { applyDocumentDirection } from '@/i18n';
 import { Header } from '@/components/Header';
 import { HeroSection } from '@/components/HeroSection';
@@ -48,6 +51,9 @@ export default function App() {
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() =>
     hasValidAdminSession()
   );
+  const [adminSession, setAdminSession] = useState<AdminSessionInfo>(() =>
+    getAdminSession() ?? { role: 'master_admin', actorName: 'Master Admin', officer: null }
+  );
   const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
   const [showVerifierScanner, setShowVerifierScanner] = useState(false);
   const [verifyQrHash, setVerifyQrHash] = useState<string | null>(() => {
@@ -79,6 +85,8 @@ export default function App() {
   const [verifications, setVerifications] = useState<FieldVerification[]>([]);
   const [donations, setDonations] = useState<Donation[]>([]);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  const [officers, setOfficers] = useState<AdminOfficer[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [loading, setLoading] = useState(true);
 
@@ -94,6 +102,8 @@ export default function App() {
     setVerifications(data.verifications);
     setDonations(data.donations);
     setNotifications(data.notifications);
+    setOfficers(data.officers ?? []);
+    setAuditLogs(data.auditLogs ?? []);
     setSettings(data.settings);
     setLoading(false);
   }, []);
@@ -236,6 +246,7 @@ export default function App() {
   const handleLogoutAdmin = () => {
     clearAdminSession();
     setIsAdminAuthenticated(false);
+    setAdminSession({ role: 'master_admin', actorName: 'Master Admin', officer: null });
     setActiveRole('donor');
     if (window.location.hash === '#admin') {
       window.history.replaceState(null, '', window.location.pathname);
@@ -446,6 +457,9 @@ export default function App() {
           />
         ) : isAdminAuthenticated ? (
           <AdminWorkspace
+            adminSession={adminSession}
+            officers={officers}
+            auditLogs={auditLogs}
             campaigns={campaigns}
             cases={cases}
             verifications={verifications}
@@ -466,16 +480,33 @@ export default function App() {
               await dataClient.confirmDonation(donationId);
               await refreshData();
             }}
-            onUpdateDonationStatus={async (donationId, status, reason) => {
-              await dataClient.updateDonationStatus(donationId, status, reason);
+            onUpdateDonationStatus={async (donationId, status, reason, partialBy) => {
+              await dataClient.updateDonationStatus(donationId, status, reason, partialBy);
               await refreshData();
             }}
             onApproveCase={async (caseId) => {
               await dataClient.approveCase(caseId);
               await refreshData();
             }}
-            onUpdateCaseStatus={async (caseId, status, reason) => {
-              await dataClient.updateCaseStatus(caseId, status, reason);
+            onUpdateCaseStatus={async (caseId, status, reason, partialBy) => {
+              await dataClient.updateCaseStatus(caseId, status, reason, partialBy);
+              await refreshData();
+            }}
+            onCreateOfficer={async (payload) => {
+              const created = await dataClient.createAdminOfficer(payload);
+              await refreshData();
+              return created;
+            }}
+            onUpdateOfficer={async (id, patch, details) => {
+              await dataClient.updateAdminOfficer(id, patch, details);
+              await refreshData();
+            }}
+            onResetOfficerPassword={async (id, newPassword) => {
+              await dataClient.resetOfficerPassword(id, newPassword);
+              await refreshData();
+            }}
+            onLogAudit={async (entry) => {
+              await dataClient.logAdminAudit(entry);
               await refreshData();
             }}
             onAssignVerifier={async (caseId, verifierId) => {
@@ -566,10 +597,19 @@ export default function App() {
         isOpen={showAdminAuthModal}
         settings={settings}
         onClose={() => setShowAdminAuthModal(false)}
-        onAuthenticated={() => {
+        onAuthenticated={(session) => {
+          setAdminSession(session);
           setIsAdminAuthenticated(true);
           setShowAdminAuthModal(false);
           setActiveRole('admin');
+        }}
+        onAuthenticateOfficer={(username, password) =>
+          dataClient.authenticateOfficer(username, password)
+        }
+        onRequestPasswordRecovery={() => dataClient.requestAdminPasswordRecovery()}
+        onCompletePasswordRecovery={async (code, newPassword) => {
+          await dataClient.completeAdminPasswordRecovery(code, newPassword);
+          await refreshData();
         }}
       />
 

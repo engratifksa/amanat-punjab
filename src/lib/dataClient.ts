@@ -1,7 +1,10 @@
 import Dexie, { type EntityTable } from 'dexie';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type {
+  AdminAuditLog,
+  AdminOfficer,
   AppDataMode,
+  OfficerPermissionTier,
   Profile,
   CrowdfundingCampaign,
   WelfareCase,
@@ -31,7 +34,7 @@ import {
   DEFAULT_APP_SETTINGS,
   makeInvoiceDataUrl,
 } from './seedData';
-import { DEFAULT_INITIAL_PASSWORD, hashAdminPassword } from './adminAuth';
+import { DEFAULT_INITIAL_PASSWORD, generateSecureOtp, hashAdminPassword } from './adminAuth';
 import {
   createNotificationRecord,
   detectCrossedMajorMilestone,
@@ -430,26 +433,41 @@ export const dataClient = {
   async loadAll() {
     await ensureLocalSeeded();
     if (supabase) {
-      const [profilesRes, campsRes, casesRes, verRes, donRes, settingsRes, notifRes] =
-        await Promise.all([
-          supabase.from('profiles').select('*'),
-          supabase
-            .from('crowdfunding_campaigns')
-            .select('*')
-            .order('created_at', { ascending: false }),
-          supabase.from('cases').select('*').order('created_at', { ascending: false }),
-          supabase
-            .from('field_verifications')
-            .select('*')
-            .order('verified_at', { ascending: false }),
-          supabase.from('donations').select('*').order('created_at', { ascending: false }),
-          supabase.from('app_settings').select('*').eq('id', 'global').maybeSingle(),
-          supabase
-            .from('notifications')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(40),
-        ]);
+      const [
+        profilesRes,
+        campsRes,
+        casesRes,
+        verRes,
+        donRes,
+        settingsRes,
+        notifRes,
+        officersRes,
+        auditRes,
+      ] = await Promise.all([
+        supabase.from('profiles').select('*'),
+        supabase
+          .from('crowdfunding_campaigns')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase.from('cases').select('*').order('created_at', { ascending: false }),
+        supabase
+          .from('field_verifications')
+          .select('*')
+          .order('verified_at', { ascending: false }),
+        supabase.from('donations').select('*').order('created_at', { ascending: false }),
+        supabase.from('app_settings').select('*').eq('id', 'global').maybeSingle(),
+        supabase
+          .from('notifications')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(40),
+        supabase.from('admin_officers').select('*').order('created_at', { ascending: false }),
+        supabase
+          .from('admin_audit_logs')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(120),
+      ]);
       const defaultHash = await hashAdminPassword(DEFAULT_INITIAL_PASSWORD);
       const rawSettings =
         (settingsRes.data as AppSettings | null) ?? {
@@ -479,6 +497,8 @@ export const dataClient = {
         verifications: allVerifications.filter((v) => Boolean(v.is_demo) === wantDemo),
         donations: allDonations.filter((d) => Boolean(d.is_demo) === wantDemo),
         notifications: allNotifications.filter((n) => Boolean(n.is_demo) === wantDemo),
+        officers: (officersRes.data ?? []) as AdminOfficer[],
+        auditLogs: (auditRes.data ?? []) as AdminAuditLog[],
         settings,
       };
     }
@@ -512,6 +532,8 @@ export const dataClient = {
       verifications: verifications.filter((v) => Boolean(v.is_demo) === wantDemo),
       donations: donations.filter((d) => Boolean(d.is_demo) === wantDemo),
       notifications,
+      officers: [] as AdminOfficer[],
+      auditLogs: [] as AdminAuditLog[],
       settings,
     };
   },
@@ -1258,14 +1280,16 @@ export const dataClient = {
   async updateCaseStatus(
     caseId: string,
     status: WelfareCase['status'],
-    rejectionReason?: string
+    rejectionReason?: string,
+    partialApprovedBy?: string | null
   ): Promise<void> {
     await ensureLocalSeeded();
     const cleanReason = status === 'rejected' ? rejectionReason?.trim() || null : null;
+    const partialBy = status === 'partial_approved' ? partialApprovedBy ?? 'Board Officer' : null;
     if (supabase) {
       const { error } = await supabase
         .from('cases')
-        .update({ status, rejection_reason: cleanReason })
+        .update({ status, rejection_reason: cleanReason, partial_approved_by: partialBy })
         .eq('id', caseId);
       if (error) throw error;
       const { data: c } = await supabase.from('cases').select('*').eq('id', caseId).maybeSingle();
@@ -1356,12 +1380,16 @@ export const dataClient = {
   async updateDonationStatus(
     donationId: string,
     nextStatus: Donation['status'],
-    rejectionReason?: string
+    rejectionReason?: string,
+    partialApprovedBy?: string | null
   ): Promise<void> {
     await ensureLocalSeeded();
     const isCounted = (s: Donation['status']) => s === 'confirmed' || s === 'paid_to_vendor';
-    const isPledged = (s: Donation['status']) => s === 'pledged_pending_verify';
+    const isPledged = (s: Donation['status']) =>
+      s === 'pledged_pending_verify' || s === 'partial_approved';
     const cleanReason = nextStatus === 'rejected' ? rejectionReason?.trim() || null : null;
+    const partialBy =
+      nextStatus === 'partial_approved' ? partialApprovedBy ?? 'Board Officer' : null;
 
     if (supabase) {
       const { data: don } = await supabase
@@ -1373,14 +1401,27 @@ export const dataClient = {
       const prevStatus = (don as Donation).status;
       if (prevStatus === nextStatus) return;
 
-      if (prevStatus === 'pledged_pending_verify' && nextStatus === 'confirmed') {
+      if (
+        (prevStatus === 'pledged_pending_verify' || prevStatus === 'partial_approved') &&
+        nextStatus === 'confirmed'
+      ) {
+        if (prevStatus === 'partial_approved') {
+          await supabase
+            .from('donations')
+            .update({ status: 'pledged_pending_verify', partial_approved_by: null })
+            .eq('id', donationId);
+        }
         await this.confirmDonation(donationId);
         return;
       }
 
       const { error } = await supabase
         .from('donations')
-        .update({ status: nextStatus, rejection_reason: cleanReason })
+        .update({
+          status: nextStatus,
+          rejection_reason: cleanReason,
+          partial_approved_by: partialBy,
+        })
         .eq('id', donationId);
       if (error) throw error;
 
@@ -2374,5 +2415,293 @@ export const dataClient = {
         }
       }
     }
+  },
+
+  async logAdminAudit(entry: {
+    actor_name: string;
+    actor_role: 'master_admin' | 'officer_partial' | 'officer_full';
+    action: string;
+    target_code: string;
+    details?: string;
+  }): Promise<void> {
+    const record: AdminAuditLog = {
+      id: generateId('aud'),
+      actor_name: entry.actor_name,
+      actor_role: entry.actor_role,
+      action: entry.action,
+      target_code: entry.target_code,
+      details: entry.details ?? '',
+      created_at: new Date().toISOString(),
+    };
+    if (supabase) {
+      await supabase.from('admin_audit_logs').insert(record);
+    }
+  },
+
+  async requestAdminPasswordRecovery(): Promise<{ sentTo: string }> {
+    const settings = await getActiveSettings();
+    const recoveryEmail =
+      settings.email_gateway?.senderEmail?.trim() ||
+      settings.social_links.email?.trim() ||
+      'support.amanat@gmail.com';
+    const code = generateSecureOtp();
+    const codeHash = await hashAdminPassword(code);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+    if (supabase) {
+      const { error } = await supabase
+        .from('app_settings')
+        .update({
+          recovery_code_hash: codeHash,
+          recovery_expires_at: expiresAt,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', 'global');
+      if (error) throw error;
+    } else {
+      await localDb.app_settings.put({
+        ...settings,
+        recovery_code_hash: codeHash,
+        recovery_expires_at: expiresAt,
+      });
+    }
+
+    const adminTg = settings.telegram_config.chatId?.trim()
+      ? [settings.telegram_config.chatId.trim()]
+      : [];
+
+    await emitNotification(
+      {
+        event_type: 'case_submitted',
+        audience: 'both',
+        target_code: 'ADMIN-RESET',
+        case_id: null,
+        campaign_id: null,
+        title_en: `Amanat Master Password Recovery Code: ${code}`,
+        title_ur: `امانت ایڈمن پاس ورڈ ری سیٹ کوڈ: ${code}`,
+        body_en: `A Master Admin Password recovery was requested. Your single-use 6-digit recovery code is ${code} (expires in 10 minutes). Return to https://amanat-punjab.vercel.app/#admin to enter this code and set a new password. If you did not request this, ignore this email.`,
+        body_ur: `امانت ایڈمن ماسٹر پاس ورڈ ری سیٹ کی درخواست موصول ہوئی ہے۔ آپ کا 6 ہندسوں والا کوڈ ${code} ہے جو 10 منٹ تک کارآمد ہے۔`,
+        vendor_name: 'Amanat Security Board',
+        district: 'Punjab',
+      },
+      [recoveryEmail],
+      adminTg
+    );
+
+    return { sentTo: recoveryEmail };
+  },
+
+  async completeAdminPasswordRecovery(code: string, newPassword: string): Promise<void> {
+    const cleanCode = code.trim();
+    const cleanPass = newPassword.trim();
+    if (cleanCode.length !== 6) {
+      throw new Error('Please enter the exact 6-digit recovery code sent to support.amanat@gmail.com.');
+    }
+    if (cleanPass.length < 6) {
+      throw new Error('New Master Password must be at least 6 characters.');
+    }
+
+    const settings = await getActiveSettings();
+    if (!settings.recovery_code_hash || !settings.recovery_expires_at) {
+      throw new Error('No active recovery request found. Please request a new recovery code.');
+    }
+    if (Date.now() > new Date(settings.recovery_expires_at).getTime()) {
+      throw new Error('Recovery code expired (10-minute limit). Please request a new code.');
+    }
+
+    const enteredHash = await hashAdminPassword(cleanCode);
+    if (enteredHash !== settings.recovery_code_hash) {
+      throw new Error('Invalid 6-digit recovery code. Please check support.amanat@gmail.com.');
+    }
+
+    const nextPassHash = await hashAdminPassword(cleanPass);
+    if (supabase) {
+      const { error } = await supabase
+        .from('app_settings')
+        .update({
+          admin_password_hash: nextPassHash,
+          recovery_code_hash: null,
+          recovery_expires_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', 'global');
+      if (error) throw error;
+    } else {
+      await localDb.app_settings.put({
+        ...settings,
+        admin_password_hash: nextPassHash,
+        recovery_code_hash: null,
+        recovery_expires_at: null,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    await this.logAdminAudit({
+      actor_name: 'Master Admin',
+      actor_role: 'master_admin',
+      action: 'MASTER_PASSWORD_RECOVERED',
+      target_code: 'ADMIN-AUTH',
+      details: 'Master password reset via 6-digit email recovery code.',
+    });
+
+    const recoveryEmail =
+      settings.email_gateway?.senderEmail?.trim() || 'support.amanat@gmail.com';
+    await emitNotification(
+      {
+        event_type: 'case_submitted',
+        audience: 'both',
+        target_code: 'ADMIN-AUTH',
+        case_id: null,
+        campaign_id: null,
+        title_en: 'Amanat Master Password Updated Successfully',
+        title_ur: 'امانت ایڈمن ماسٹر پاس ورڈ کامیابی سے تبدیل ہو گیا',
+        body_en:
+          'Your Amanat Verification Board Master Password was just reset via email recovery. You can now sign in with your new password.',
+        body_ur: 'آپ کا امانت ایڈمن ماسٹر پاس ورڈ کامیابی سے تبدیل کر دیا گیا ہے۔',
+        vendor_name: 'Amanat Security Board',
+        district: 'Punjab',
+      },
+      [recoveryEmail]
+    );
+  },
+
+  async authenticateOfficer(username: string, password: string): Promise<AdminOfficer> {
+    const cleanUser = username.trim().toLowerCase();
+    const passHash = await hashAdminPassword(password);
+    if (!supabase) {
+      throw new Error('Board Officer login requires live Supabase connection.');
+    }
+    const { data, error } = await supabase
+      .from('admin_officers')
+      .select('*')
+      .ilike('username', cleanUser)
+      .maybeSingle();
+    if (error || !data) {
+      throw new Error('Invalid Board Officer username or password.');
+    }
+    const officer = data as AdminOfficer;
+    if (!officer.is_active) {
+      throw new Error('This Board Officer account has been suspended/revoked by Master Admin.');
+    }
+    if (officer.password_hash !== passHash) {
+      throw new Error('Invalid Board Officer username or password.');
+    }
+    return officer;
+  },
+
+  async createAdminOfficer(input: {
+    full_name: string;
+    cnic_number: string;
+    phone: string;
+    email: string;
+    username: string;
+    password: string;
+    permission_tier: OfficerPermissionTier;
+    district_scope: string;
+    max_approval_pkr: number | null;
+  }): Promise<AdminOfficer> {
+    if (!supabase) throw new Error('Supabase required to create Board Officers.');
+    const cleanUsername = input.username.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+    if (cleanUsername.length < 3) {
+      throw new Error('Username must be at least 3 characters (letters, numbers, ., _, -).');
+    }
+    if (input.password.trim().length < 6) {
+      throw new Error('Initial password must be at least 6 characters.');
+    }
+    const password_hash = await hashAdminPassword(input.password.trim());
+    const officer: AdminOfficer = {
+      id: generateId('off'),
+      full_name: input.full_name.trim(),
+      cnic_number: input.cnic_number.trim(),
+      phone: input.phone.trim(),
+      email: input.email.trim().toLowerCase(),
+      username: cleanUsername,
+      password_hash,
+      permission_tier: input.permission_tier,
+      district_scope: input.district_scope || 'all',
+      max_approval_pkr: input.max_approval_pkr,
+      is_active: true,
+      created_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase
+      .from('admin_officers')
+      .insert(officer)
+      .select()
+      .single();
+    if (error) {
+      if (error.message.toLowerCase().includes('unique') || error.code === '23505') {
+        throw new Error(`Username "${cleanUsername}" is already taken. Choose another username.`);
+      }
+      throw error;
+    }
+
+    await this.logAdminAudit({
+      actor_name: 'Master Admin',
+      actor_role: 'master_admin',
+      action: 'CREATED_OFFICER',
+      target_code: cleanUsername,
+      details: `${officer.full_name} · Tier: ${officer.permission_tier} · Scope: ${officer.district_scope}${officer.max_approval_pkr ? ` · Cap: PKR ${officer.max_approval_pkr.toLocaleString('en-PK')}` : ''}`,
+    });
+
+    // Email credentials cleanly to the new Board Officer
+    if (officer.email) {
+      await emitNotification(
+        {
+          event_type: 'case_submitted',
+          audience: 'both',
+          target_code: cleanUsername.toUpperCase(),
+          case_id: null,
+          campaign_id: null,
+          title_en: 'Welcome — Your Amanat Board Officer Account Is Active',
+          title_ur: 'خوش آمدید — آپ کا امانت بورڈ آفیسر اکاؤنٹ فعال ہو گیا ہے',
+          body_en: `Assalam-o-Alaikum ${officer.full_name}, Master Admin has created your Board Officer account on Amanat. Login at https://amanat-punjab.vercel.app/#admin (select "Board Officer" tab). Username: ${cleanUsername} · Role: ${officer.permission_tier === 'full_approve' ? 'Full Approver & Reject' : 'Partial Approver & Reject'} · Coverage: ${officer.district_scope === 'all' ? 'All Punjab' : officer.district_scope}. Please get your initial password directly from Master Admin.`,
+          body_ur: `السلام علیکم ${officer.full_name}، آپ کا امانت بورڈ آفیسر اکاؤنٹ (${cleanUsername}) فعال کر دیا گیا ہے۔`,
+          vendor_name: 'Amanat Verification Board',
+          district: officer.district_scope === 'all' ? 'Punjab' : officer.district_scope,
+        },
+        [officer.email]
+      );
+    }
+
+    return data as AdminOfficer;
+  },
+
+  async updateAdminOfficer(
+    id: string,
+    patch: Partial<
+      Pick<AdminOfficer, 'is_active' | 'permission_tier' | 'district_scope' | 'max_approval_pkr'>
+    >,
+    auditDetails: string
+  ): Promise<void> {
+    if (!supabase) return;
+    const { error } = await supabase.from('admin_officers').update(patch).eq('id', id);
+    if (error) throw error;
+    await this.logAdminAudit({
+      actor_name: 'Master Admin',
+      actor_role: 'master_admin',
+      action: patch.is_active === false ? 'REVOKED_OFFICER' : 'UPDATED_OFFICER',
+      target_code: id,
+      details: auditDetails,
+    });
+  },
+
+  async resetOfficerPassword(id: string, newPassword: string): Promise<void> {
+    if (!supabase) return;
+    if (newPassword.trim().length < 6) {
+      throw new Error('New password must be at least 6 characters.');
+    }
+    const password_hash = await hashAdminPassword(newPassword.trim());
+    const { error } = await supabase
+      .from('admin_officers')
+      .update({ password_hash })
+      .eq('id', id);
+    if (error) throw error;
+    await this.logAdminAudit({
+      actor_name: 'Master Admin',
+      actor_role: 'master_admin',
+      action: 'RESET_OFFICER_PASSWORD',
+      target_code: id,
+      details: 'Master Admin reset Board Officer password.',
+    });
   },
 };

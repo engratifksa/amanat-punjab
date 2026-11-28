@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { VolunteerPostModal } from './VolunteerPostModal';
 import { TelegramGuideModal } from './TelegramGuideModal';
+import { BoardOfficersTab } from './BoardOfficersTab';
 import {
   parseAndVerifyBackupJson,
   triggerBackupDownload,
@@ -44,6 +45,9 @@ import {
   exportSingleCampaignCsv,
 } from '@/lib/csvExport';
 import type {
+  AdminAuditLog,
+  AdminOfficer,
+  AdminSessionInfo,
   AppDataMode,
   AppSettings,
   CampaignCategory,
@@ -55,6 +59,7 @@ import type {
   FieldVerification,
   FundingType,
   NotificationRecord,
+  OfficerPermissionTier,
   Profile,
   WelfareCase,
 } from '@/types/amanat';
@@ -65,6 +70,9 @@ import { Badge, Button, Card, Input, Select, Textarea } from './ui/primitives';
 import { DualProgressBar } from './DualProgressBar';
 
 interface AdminWorkspaceProps {
+  adminSession: AdminSessionInfo;
+  officers: AdminOfficer[];
+  auditLogs: AdminAuditLog[];
   campaigns: CrowdfundingCampaign[];
   cases: WelfareCase[];
   verifications?: FieldVerification[];
@@ -89,14 +97,42 @@ interface AdminWorkspaceProps {
   onUpdateDonationStatus: (
     donationId: string,
     status: DonationStatus,
-    rejectionReason?: string
+    rejectionReason?: string,
+    partialApprovedBy?: string | null
   ) => Promise<void>;
   onApproveCase: (caseId: string) => Promise<void>;
   onUpdateCaseStatus: (
     caseId: string,
     status: CaseStatus,
-    rejectionReason?: string
+    rejectionReason?: string,
+    partialApprovedBy?: string | null
   ) => Promise<void>;
+  onCreateOfficer: (payload: {
+    full_name: string;
+    cnic_number: string;
+    phone: string;
+    email: string;
+    username: string;
+    password: string;
+    permission_tier: OfficerPermissionTier;
+    district_scope: string;
+    max_approval_pkr: number | null;
+  }) => Promise<AdminOfficer>;
+  onUpdateOfficer: (
+    id: string,
+    patch: Partial<
+      Pick<AdminOfficer, 'is_active' | 'permission_tier' | 'district_scope' | 'max_approval_pkr'>
+    >,
+    auditDetails: string
+  ) => Promise<void>;
+  onResetOfficerPassword: (id: string, newPassword: string) => Promise<void>;
+  onLogAudit: (entry: {
+    actor_name: string;
+    actor_role: 'master_admin' | 'officer_partial' | 'officer_full';
+    action: string;
+    target_code: string;
+    details?: string;
+  }) => Promise<void>;
   onAssignVerifier: (caseId: string, verifierId: string) => Promise<void>;
   onToggleVerifier: (profileId: string, accredited: boolean) => Promise<void>;
   onUploadCampaignReceipt: (id: string, receiptUrl: string) => Promise<void>;
@@ -117,6 +153,9 @@ interface AdminWorkspaceProps {
 }
 
 export function AdminWorkspace({
+  adminSession,
+  officers,
+  auditLogs,
   campaigns,
   cases,
   verifications = [],
@@ -130,6 +169,10 @@ export function AdminWorkspace({
   onUpdateDonationStatus,
   onApproveCase,
   onUpdateCaseStatus,
+  onCreateOfficer,
+  onUpdateOfficer,
+  onResetOfficerPassword,
+  onLogAudit,
   onAssignVerifier,
   onToggleVerifier,
   onUploadCampaignReceipt,
@@ -149,9 +192,35 @@ export function AdminWorkspace({
   onLogoutAdmin,
 }: AdminWorkspaceProps) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<'crowdfunding' | 'audit' | 'settings'>('crowdfunding');
+  const isMasterAdmin = adminSession.role === 'master_admin';
+  const activeOfficer = adminSession.officer ?? null;
+  const isFullApprover = isMasterAdmin || activeOfficer?.permission_tier === 'full_approve';
+  const canViewVerifiers = isMasterAdmin || activeOfficer?.permission_tier === 'full_approve';
+  const canManageVerifiers = isMasterAdmin;
+  const canDelete = isMasterAdmin;
+  const actorRole: 'master_admin' | 'officer_partial' | 'officer_full' = isMasterAdmin
+    ? 'master_admin'
+    : activeOfficer?.permission_tier === 'full_approve'
+    ? 'officer_full'
+    : 'officer_partial';
+
+  const exceedsOfficerCap = (amountPkr: number) =>
+    !isMasterAdmin &&
+    activeOfficer?.permission_tier === 'full_approve' &&
+    Boolean(activeOfficer.max_approval_pkr) &&
+    amountPkr > (activeOfficer.max_approval_pkr ?? Infinity);
+
+  const [tab, setTab] = useState<'crowdfunding' | 'audit' | 'officers' | 'settings'>(
+    isMasterAdmin ? 'crowdfunding' : 'audit'
+  );
   const [donationFilter, setDonationFilter] = useState<'all' | DonationStatus>('all');
   const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isMasterAdmin && tab !== 'audit') {
+      setTab('audit');
+    }
+  }, [isMasterAdmin, tab]);
 
   // New Campaign form state
   const [titleEn, setTitleEn] = useState('');
@@ -297,9 +366,33 @@ export function AdminWorkspace({
     setDraftSettings(settings);
   }, [settings]);
 
-  const pendingDonations = donations.filter((d) => d.status === 'pledged_pending_verify');
-  const incomingTriageCases = cases.filter((c) => c.status === 'pending_admin_review');
-  const fieldVerifiedCases = cases.filter((c) => c.status === 'field_verified');
+  // District scoping for Board Officers (All Punjab for Master Admin or district_scope === 'all')
+  const scopedCases =
+    activeOfficer && activeOfficer.district_scope !== 'all'
+      ? cases.filter(
+          (c) => c.district.toLowerCase() === activeOfficer.district_scope.toLowerCase()
+        )
+      : cases;
+
+  const scopedDonations =
+    activeOfficer && activeOfficer.district_scope !== 'all'
+      ? donations.filter((d) => {
+          const cs = cases.find((c) => c.id === d.case_id);
+          const camp = campaigns.find((c) => c.id === d.campaign_id);
+          return (
+            cs?.district.toLowerCase() === activeOfficer.district_scope.toLowerCase() ||
+            camp?.district.toLowerCase() === activeOfficer.district_scope.toLowerCase()
+          );
+        })
+      : donations;
+
+  const pendingDonations = scopedDonations.filter(
+    (d) => d.status === 'pledged_pending_verify' || d.status === 'partial_approved'
+  );
+  const incomingTriageCases = scopedCases.filter((c) => c.status === 'pending_admin_review');
+  const fieldVerifiedCases = scopedCases.filter(
+    (c) => c.status === 'field_verified' || c.status === 'partial_approved'
+  );
   const verifiers = profiles.filter((p) => p.role === 'verifier');
   const accreditedVerifiers = verifiers.filter((v) => v.is_accredited_verifier);
 
@@ -406,7 +499,11 @@ export function AdminWorkspace({
               className="bg-gold-500/20 text-gold-200 border-gold-400/30"
             >
               <ShieldCheck className="h-3.5 w-3.5" />
-              2FA Verified Admin Session
+              {isMasterAdmin
+                ? '2FA Verified Master Admin'
+                : `Board Officer: ${adminSession.actorName} (${
+                    isFullApprover ? 'Tier 2: Full Approver' : 'Tier 1: Partial Approver'
+                  })`}
             </Badge>
             <button
               type="button"
@@ -417,7 +514,8 @@ export function AdminWorkspace({
               Lock / Sign Out
             </button>
 
-            {/* 2-Stage Mode Switch: LIVE (Real Data) vs TRAINING (Dummy Mode) */}
+            {/* 2-Stage Mode Switch: Master Admin ONLY */}
+            {isMasterAdmin && (
             <div
               className="inline-flex items-center rounded-full bg-black/30 p-0.5 border border-white/15"
               role="group"
@@ -470,6 +568,7 @@ export function AdminWorkspace({
                 TRAINING (Dummy)
               </button>
             </div>
+            )}
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold">{t('admin.title')}</h1>
           <p className="mt-1.5 max-w-2xl text-sm text-emerald-100/85">
@@ -479,18 +578,20 @@ export function AdminWorkspace({
 
         {/* Admin Sub-tabs */}
         <div className="flex flex-wrap rounded-2xl bg-white/10 p-1.5 border border-white/15 gap-1">
-          <button
-            type="button"
-            onClick={() => setTab('crowdfunding')}
-            className={cn(
-              'rounded-xl px-3.5 py-2 text-xs font-extrabold transition-all',
-              tab === 'crowdfunding'
-                ? 'bg-gold-500 text-white shadow-gold'
-                : 'text-emerald-100 hover:bg-white/10'
-            )}
-          >
-            Crowdfunding Drives ({campaigns.length})
-          </button>
+          {isMasterAdmin && (
+            <button
+              type="button"
+              onClick={() => setTab('crowdfunding')}
+              className={cn(
+                'rounded-xl px-3.5 py-2 text-xs font-extrabold transition-all',
+                tab === 'crowdfunding'
+                  ? 'bg-gold-500 text-white shadow-gold'
+                  : 'text-emerald-100 hover:bg-white/10'
+              )}
+            >
+              Crowdfunding Drives ({campaigns.length})
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setTab('audit')}
@@ -501,21 +602,38 @@ export function AdminWorkspace({
                 : 'text-emerald-100 hover:bg-white/10'
             )}
           >
-            Individual Cases &amp; Donations ({cases.length} / {donations.length})
+            Individual Cases &amp; Donations ({scopedCases.length} / {scopedDonations.length})
           </button>
-          <button
-            type="button"
-            onClick={() => setTab('settings')}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-extrabold transition-all',
-              tab === 'settings'
-                ? 'bg-gold-500 text-white shadow-gold'
-                : 'text-emerald-100 hover:bg-white/10'
-            )}
-          >
-            <Settings className="h-3.5 w-3.5" />
-            <span>{t('admin.tabSettings')}</span>
-          </button>
+          {isMasterAdmin && (
+            <button
+              type="button"
+              onClick={() => setTab('officers')}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-extrabold transition-all',
+                tab === 'officers'
+                  ? 'bg-gold-500 text-white shadow-gold'
+                  : 'text-emerald-100 hover:bg-white/10'
+              )}
+            >
+              <UserCheck className="h-3.5 w-3.5" />
+              <span>Officers &amp; Audit ({officers.length})</span>
+            </button>
+          )}
+          {isMasterAdmin && (
+            <button
+              type="button"
+              onClick={() => setTab('settings')}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-extrabold transition-all',
+                tab === 'settings'
+                  ? 'bg-gold-500 text-white shadow-gold'
+                  : 'text-emerald-100 hover:bg-white/10'
+              )}
+            >
+              <Settings className="h-3.5 w-3.5" />
+              <span>{t('admin.tabSettings')}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -535,7 +653,7 @@ export function AdminWorkspace({
         </div>
       )}
 
-      {tab === 'crowdfunding' ? (
+      {tab === 'crowdfunding' && isMasterAdmin ? (
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
           {/* Create New Crowdfunding Drive Form */}
           <Card className="lg:col-span-5 p-6 space-y-4">
@@ -827,29 +945,36 @@ export function AdminWorkspace({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-base font-extrabold text-emerald-950 flex items-center gap-2">
                   <FileCheck2 className="h-5 w-5 text-gold-600" />
-                  Donor Contributions Ledger ({donations.length})
+                  Donor Contributions Ledger ({scopedDonations.length})
                 </h2>
                 <span className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
-                  {pendingDonations.length} Pledged Pending
+                  {pendingDonations.length} Pending / Partial
                 </span>
               </div>
 
               <div className="flex flex-wrap gap-1.5">
                 {(
                   [
-                    { id: 'all', label: `All (${donations.length})` },
-                    { id: 'pledged_pending_verify', label: `Pledged (${pendingDonations.length})` },
+                    { id: 'all', label: `All (${scopedDonations.length})` },
+                    {
+                      id: 'pledged_pending_verify',
+                      label: `Pledged (${scopedDonations.filter((d) => d.status === 'pledged_pending_verify').length})`,
+                    },
+                    {
+                      id: 'partial_approved',
+                      label: `Partial Approved (${scopedDonations.filter((d) => d.status === 'partial_approved').length})`,
+                    },
                     {
                       id: 'confirmed',
-                      label: `Confirmed (${donations.filter((d) => d.status === 'confirmed').length})`,
+                      label: `Confirmed (${scopedDonations.filter((d) => d.status === 'confirmed').length})`,
                     },
                     {
                       id: 'rejected',
-                      label: `Rejected (${donations.filter((d) => d.status === 'rejected').length})`,
+                      label: `Rejected (${scopedDonations.filter((d) => d.status === 'rejected').length})`,
                     },
                     {
                       id: 'paid_to_vendor',
-                      label: `Paid (${donations.filter((d) => d.status === 'paid_to_vendor').length})`,
+                      label: `Paid (${scopedDonations.filter((d) => d.status === 'paid_to_vendor').length})`,
                     },
                   ] as const
                 ).map((f) => (
@@ -870,21 +995,23 @@ export function AdminWorkspace({
               </div>
             </div>
 
-            {donations.filter((d) => donationFilter === 'all' || d.status === donationFilter)
+            {scopedDonations.filter((d) => donationFilter === 'all' || d.status === donationFilter)
               .length === 0 ? (
               <p className="rounded-xl bg-slate-50 p-4 text-xs text-slate-600">
                 No donor contributions match this status filter.
               </p>
             ) : (
               <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
-                {donations
+                {scopedDonations
                   .filter((d) => donationFilter === 'all' || d.status === donationFilter)
-                  .map((d) => (
+                  .map((d) => {
+                    const overCap = exceedsOfficerCap(d.amount_pkr);
+                    return (
                     <div
                       key={d.id}
                       className={cn(
                         'flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border p-4',
-                        d.status === 'pledged_pending_verify'
+                        d.status === 'pledged_pending_verify' || d.status === 'partial_approved'
                           ? 'border-gold-200 bg-gold-50/40'
                           : d.status === 'rejected'
                           ? 'border-rose-200 bg-rose-50/40'
@@ -911,6 +1038,11 @@ export function AdminWorkspace({
                             {d.payment_channel.toUpperCase()} · {d.transaction_ref}
                           </span>
                         </div>
+                        {d.status === 'partial_approved' && d.partial_approved_by && (
+                          <p className="text-[11px] font-extrabold text-amber-900">
+                            Partial Approved by {d.partial_approved_by} — Awaiting Master Admin Final Sign-Off
+                          </p>
+                        )}
                         <p className="text-slate-600 font-medium">{getDonationTargetLabel(d)}</p>
                         <p className="font-mono text-[11px] text-slate-500">
                           QR: {d.receipt_qr_hash}
@@ -924,64 +1056,159 @@ export function AdminWorkspace({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                        <Select
-                          value={d.status}
-                          onChange={async (e) => {
-                            const next = e.target.value as DonationStatus;
-                            let reason: string | undefined;
-                            if (next === 'rejected') {
-                              const input = window.prompt(
-                                `Optional rejection reason for Ref ${d.transaction_ref} (sent politely to donor):`,
-                                'Transaction reference could not be verified on bank/wallet statement.'
-                              );
-                              if (input === null) return;
-                              reason = input;
-                            }
-                            await onUpdateDonationStatus(d.id, next, reason);
-                            setNotice(
-                              `Updated ${d.transaction_ref} to ${next.replace(/_/g, ' ').toUpperCase()} — ledger totals synced!`
-                            );
-                          }}
-                          className="h-8 text-[11px] font-bold py-1 px-2 w-auto"
-                          aria-label={`Change status for donation ${d.transaction_ref}`}
-                        >
-                          <option value="pledged_pending_verify">Pledged (Pending)</option>
-                          <option value="confirmed">Approved (Confirmed)</option>
-                          <option value="rejected">Rejected</option>
-                          <option value="paid_to_vendor">Paid to Vendor</option>
-                        </Select>
-
-                        {d.status === 'pledged_pending_verify' && (
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={async () => {
-                              await onConfirmDonation(d.id);
+                        {isMasterAdmin ? (
+                          <Select
+                            value={d.status}
+                            onChange={async (e) => {
+                              const next = e.target.value as DonationStatus;
+                              let reason: string | undefined;
+                              if (next === 'rejected') {
+                                const input = window.prompt(
+                                  `Optional rejection reason for Ref ${d.transaction_ref} (sent politely to donor):`,
+                                  'Transaction reference could not be verified on bank/wallet statement.'
+                                );
+                                if (input === null) return;
+                                reason = input;
+                              }
+                              await onUpdateDonationStatus(d.id, next, reason, adminSession.actorName);
+                              await onLogAudit({
+                                actor_name: adminSession.actorName,
+                                actor_role: actorRole,
+                                action: `DONATION_${next.toUpperCase()}`,
+                                target_code: d.transaction_ref,
+                                details: reason || `${formatPKR(d.amount_pkr)}`,
+                              });
                               setNotice(
-                                `Confirmed ${formatPKR(d.amount_pkr)} (Ref: ${d.transaction_ref}) — progress bar & donor count updated!`
+                                `Updated ${d.transaction_ref} to ${next.replace(/_/g, ' ').toUpperCase()} — ledger totals synced!`
                               );
                             }}
+                            className="h-8 text-[11px] font-bold py-1 px-2 w-auto"
+                            aria-label={`Change status for donation ${d.transaction_ref}`}
                           >
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            Approve
-                          </Button>
+                            <option value="pledged_pending_verify">Pledged (Pending)</option>
+                            <option value="partial_approved">Partial Approved</option>
+                            <option value="confirmed">Approved (Confirmed)</option>
+                            <option value="rejected">Rejected</option>
+                            <option value="paid_to_vendor">Paid to Vendor</option>
+                          </Select>
+                        ) : (
+                          <>
+                            {(d.status === 'pledged_pending_verify' ||
+                              d.status === 'partial_approved') && (
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={async () => {
+                                  const canFinal = isFullApprover && !overCap;
+                                  const next: DonationStatus = canFinal
+                                    ? 'confirmed'
+                                    : 'partial_approved';
+                                  await onUpdateDonationStatus(
+                                    d.id,
+                                    next,
+                                    undefined,
+                                    adminSession.actorName
+                                  );
+                                  await onLogAudit({
+                                    actor_name: adminSession.actorName,
+                                    actor_role: actorRole,
+                                    action: canFinal
+                                      ? 'CONFIRMED_DONATION'
+                                      : 'PARTIAL_APPROVED_DONATION',
+                                    target_code: d.transaction_ref,
+                                    details: overCap
+                                      ? `${formatPKR(d.amount_pkr)} exceeded officer cap — routed to Master Admin`
+                                      : `${formatPKR(d.amount_pkr)}`,
+                                  });
+                                  setNotice(
+                                    canFinal
+                                      ? `Approved ${formatPKR(d.amount_pkr)} (Ref: ${d.transaction_ref})!`
+                                      : `Partial Approved ${d.transaction_ref} — queued for Master Admin final sign-off!`
+                                  );
+                                }}
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                {isFullApprover && !overCap ? 'Approve' : 'Partial Approve'}
+                              </Button>
+                            )}
+                            {d.status !== 'rejected' && d.status !== 'paid_to_vendor' && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={async () => {
+                                  const input = window.prompt(
+                                    `Rejection reason for Ref ${d.transaction_ref}:`,
+                                    'Transaction reference could not be verified.'
+                                  );
+                                  if (input === null) return;
+                                  await onUpdateDonationStatus(d.id, 'rejected', input);
+                                  await onLogAudit({
+                                    actor_name: adminSession.actorName,
+                                    actor_role: actorRole,
+                                    action: 'REJECTED_DONATION',
+                                    target_code: d.transaction_ref,
+                                    details: input,
+                                  });
+                                  setNotice(`Rejected donation ${d.transaction_ref}.`);
+                                }}
+                              >
+                                Reject
+                              </Button>
+                            )}
+                          </>
                         )}
 
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={async () => {
-                            if (!window.confirm(`Delete donation ref ${d.transaction_ref}?`)) return;
-                            await onDeleteDonation(d.id);
-                            setNotice(`Deleted donation ${d.transaction_ref}.`);
-                          }}
-                          title="Delete Donation"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {isMasterAdmin &&
+                          (d.status === 'pledged_pending_verify' ||
+                            d.status === 'partial_approved') && (
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={async () => {
+                                await onUpdateDonationStatus(d.id, 'confirmed');
+                                await onLogAudit({
+                                  actor_name: adminSession.actorName,
+                                  actor_role: actorRole,
+                                  action: 'CONFIRMED_DONATION',
+                                  target_code: d.transaction_ref,
+                                  details: formatPKR(d.amount_pkr),
+                                });
+                                setNotice(
+                                  `Confirmed ${formatPKR(d.amount_pkr)} (Ref: ${d.transaction_ref}) — progress bar & donor count updated!`
+                                );
+                              }}
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              {d.status === 'partial_approved' ? 'Final Approve' : 'Approve'}
+                            </Button>
+                          )}
+
+                        {canDelete && (
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={async () => {
+                              if (!window.confirm(`Delete donation ref ${d.transaction_ref}?`))
+                                return;
+                              await onDeleteDonation(d.id);
+                              await onLogAudit({
+                                actor_name: adminSession.actorName,
+                                actor_role: actorRole,
+                                action: 'DELETED_DONATION',
+                                target_code: d.transaction_ref,
+                                details: formatPKR(d.amount_pkr),
+                              });
+                              setNotice(`Deleted donation ${d.transaction_ref}.`);
+                            }}
+                            title="Delete Donation"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </div>
-                  ))}
+                  );
+                  })}
               </div>
             )}
 
@@ -1079,6 +1306,8 @@ export function AdminWorkspace({
               ) : (
                 fieldVerifiedCases.map((c) => {
                   const latestVer = verifications.find((v) => v.case_id === c.id);
+                  const overCap = exceedsOfficerCap(c.target_amount_pkr);
+                  const canFinal = isFullApprover && !overCap;
                   return (
                     <div
                       key={c.id}
@@ -1089,6 +1318,11 @@ export function AdminWorkspace({
                           <span className="font-mono font-extrabold text-emerald-900">
                             {c.case_code} · {c.district} ({formatPKR(c.target_amount_pkr)})
                           </span>
+                          {c.status === 'partial_approved' && (
+                            <Badge variant="gold">
+                              Partial Approved by {c.partial_approved_by || 'Officer'}
+                            </Badge>
+                          )}
                           {latestVer?.handshake_pin_verified && (
                             <Badge variant="emerald">Mutual PIN Verified</Badge>
                           )}
@@ -1106,16 +1340,74 @@ export function AdminWorkspace({
                         <p className="text-slate-700">{c.anonymized_story_en}</p>
                         <p className="text-slate-500">Vendor: {c.vendor_name}</p>
                       </div>
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={async () => {
-                          await onApproveCase(c.id);
-                          setNotice(`Approved & published ${c.case_code} to the public donor feed!`);
-                        }}
-                      >
-                        {t('admin.approvePublish')}
-                      </Button>
+                      <div className="flex flex-wrap gap-1.5 shrink-0">
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={async () => {
+                            if (canFinal) {
+                              await onApproveCase(c.id);
+                              await onLogAudit({
+                                actor_name: adminSession.actorName,
+                                actor_role: actorRole,
+                                action: 'APPROVED_CASE',
+                                target_code: c.case_code,
+                                details: `${c.district} · ${formatPKR(c.target_amount_pkr)}`,
+                              });
+                              setNotice(
+                                `Approved & published ${c.case_code} to the public donor feed!`
+                              );
+                            } else {
+                              await onUpdateCaseStatus(
+                                c.id,
+                                'partial_approved',
+                                undefined,
+                                adminSession.actorName
+                              );
+                              await onLogAudit({
+                                actor_name: adminSession.actorName,
+                                actor_role: actorRole,
+                                action: 'PARTIAL_APPROVED_CASE',
+                                target_code: c.case_code,
+                                details: overCap
+                                  ? `Amount ${formatPKR(c.target_amount_pkr)} exceeds officer cap — awaiting Master Admin`
+                                  : `Partial approved by ${adminSession.actorName}`,
+                              });
+                              setNotice(
+                                `Partial Approved ${c.case_code} — queued for Master Admin final sign-off!`
+                              );
+                            }
+                          }}
+                        >
+                          {isMasterAdmin && c.status === 'partial_approved'
+                            ? 'Final Approve & Publish'
+                            : canFinal
+                            ? t('admin.approvePublish')
+                            : 'Partial Approve'}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            const reason = window.prompt(
+                              `Rejection reason for ${c.case_code}:`,
+                              'Eligibility or vendor quotation could not be confirmed.'
+                            );
+                            if (reason === null) return;
+                            await onUpdateCaseStatus(c.id, 'rejected', reason);
+                            await onLogAudit({
+                              actor_name: adminSession.actorName,
+                              actor_role: actorRole,
+                              action: 'REJECTED_CASE',
+                              target_code: c.case_code,
+                              details: reason,
+                            });
+                            setNotice(`Rejected ${c.case_code}.`);
+                          }}
+                        >
+                          Reject
+                        </Button>
+                      </div>
                     </div>
                   );
                 })
@@ -1124,11 +1416,15 @@ export function AdminWorkspace({
           </Card>
 
           <div className="lg:col-span-5 space-y-6">
+            {canViewVerifiers && (
             <Card className="p-6 space-y-3.5">
-              <h2 className="text-base font-extrabold text-emerald-950 flex items-center gap-2">
-                <UserCheck className="h-5 w-5 text-emerald-700" />
-                {t('admin.verifiersList')}
-              </h2>
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-base font-extrabold text-emerald-950 flex items-center gap-2">
+                  <UserCheck className="h-5 w-5 text-emerald-700" />
+                  {t('admin.verifiersList')}
+                </h2>
+                {!canManageVerifiers && <Badge variant="slate">View Only</Badge>}
+              </div>
               {verifiers.map((v) => (
                 <div
                   key={v.id}
@@ -1161,44 +1457,53 @@ export function AdminWorkspace({
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <Button
-                      variant={v.is_accredited_verifier ? 'outline' : 'primary'}
-                      size="sm"
-                      onClick={() => onToggleVerifier(v.id, !v.is_accredited_verifier)}
-                    >
-                      {v.is_accredited_verifier ? t('admin.revoke') : t('admin.accredit')}
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      onClick={async () => {
-                        if (!window.confirm(`Delete verifier profile ${v.full_name}?`)) return;
-                        await onDeleteProfile(v.id);
-                        setNotice(`Deleted verifier ${v.full_name}.`);
-                      }}
-                      title="Delete Profile"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
+                  {canManageVerifiers ? (
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        variant={v.is_accredited_verifier ? 'outline' : 'primary'}
+                        size="sm"
+                        onClick={() => onToggleVerifier(v.id, !v.is_accredited_verifier)}
+                      >
+                        {v.is_accredited_verifier ? t('admin.revoke') : t('admin.accredit')}
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={async () => {
+                          if (!window.confirm(`Delete verifier profile ${v.full_name}?`)) return;
+                          await onDeleteProfile(v.id);
+                          setNotice(`Deleted verifier ${v.full_name}.`);
+                        }}
+                        title="Delete Profile"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Badge variant={v.is_accredited_verifier ? 'emerald' : 'gold'}>
+                      {v.is_accredited_verifier ? 'Accredited' : 'Pending'}
+                    </Badge>
+                  )}
                 </div>
               ))}
             </Card>
+            )}
 
             <Card className="p-6 space-y-3">
               <div>
                 <h2 className="text-sm font-extrabold text-emerald-950 flex items-center gap-2">
                   <Receipt className="h-4 w-4 text-gold-600" />
-                  All Individual Cases Control ({cases.length})
+                  All Individual Cases Control ({scopedCases.length})
                 </h2>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  Controls Landing Page → <strong>Field-Verified Individual Cases</strong>. Change
-                  status (Approved, Pending, Rejected, Paid) or delete any entry.
+                  Controls Landing Page → <strong>Field-Verified Individual Cases</strong>.
+                  {isMasterAdmin
+                    ? ' Change status (Approved, Partial, Pending, Rejected, Paid) or delete any entry.'
+                    : ' Scoped Board Officer view — Approve/Partial Approve or Reject (Deletion restricted to Master Admin).'}
                 </p>
               </div>
               <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
-                {cases.map((c) => {
+                {scopedCases.map((c) => {
                   const isPublicLive = ['approved', 'funded', 'disbursed_to_vendor'].includes(
                     c.status
                   );
@@ -1243,37 +1548,105 @@ export function AdminWorkspace({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <Select
-                          value={c.status}
-                          onChange={async (e) => {
-                            const next = e.target.value as CaseStatus;
-                            let reason: string | undefined;
-                            if (next === 'rejected') {
-                              const input = window.prompt(
-                                `Optional rejection reason for ${c.case_code} (sent politely to beneficiary):`,
-                                'Incomplete vendor quotation or eligibility could not be confirmed.'
+                        {isMasterAdmin ? (
+                          <Select
+                            value={c.status}
+                            onChange={async (e) => {
+                              const next = e.target.value as CaseStatus;
+                              let reason: string | undefined;
+                              if (next === 'rejected') {
+                                const input = window.prompt(
+                                  `Optional rejection reason for ${c.case_code} (sent politely to beneficiary):`,
+                                  'Incomplete vendor quotation or eligibility could not be confirmed.'
+                                );
+                                if (input === null) return;
+                                reason = input;
+                              }
+                              await onUpdateCaseStatus(c.id, next, reason, adminSession.actorName);
+                              await onLogAudit({
+                                actor_name: adminSession.actorName,
+                                actor_role: actorRole,
+                                action: `CASE_${next.toUpperCase()}`,
+                                target_code: c.case_code,
+                                details: reason || c.district,
+                              });
+                              setNotice(
+                                `Updated ${c.case_code} to ${next.replace(/_/g, ' ').toUpperCase()}!`
                               );
-                              if (input === null) return;
-                              reason = input;
-                            }
-                            await onUpdateCaseStatus(c.id, next, reason);
-                            setNotice(
-                              `Updated ${c.case_code} to ${next.replace(/_/g, ' ').toUpperCase()}!`
-                            );
-                          }}
-                          className="h-8 text-[11px] font-bold py-1 px-2 flex-1 min-w-[140px]"
-                          aria-label={`Change status for case ${c.case_code}`}
-                        >
-                          <option value="pending_admin_review">Pending Admin Review</option>
-                          <option value="pending_field_visit">Pending Field Visit</option>
-                          <option value="field_verified">Field Verified</option>
-                          <option value="approved">Approved (Live on Landing)</option>
-                          <option value="funded">Funded</option>
-                          <option value="disbursed_to_vendor">Paid to Vendor</option>
-                          <option value="rejected">Rejected</option>
-                        </Select>
+                            }}
+                            className="h-8 text-[11px] font-bold py-1 px-2 flex-1 min-w-[140px]"
+                            aria-label={`Change status for case ${c.case_code}`}
+                          >
+                            <option value="pending_admin_review">Pending Admin Review</option>
+                            <option value="pending_field_visit">Pending Field Visit</option>
+                            <option value="field_verified">Field Verified</option>
+                            <option value="partial_approved">Partial Approved (Officer)</option>
+                            <option value="approved">Approved (Live on Landing)</option>
+                            <option value="funded">Funded</option>
+                            <option value="disbursed_to_vendor">Paid to Vendor</option>
+                            <option value="rejected">Rejected</option>
+                          </Select>
+                        ) : (
+                          <>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              disabled={c.status === 'approved' || c.status === 'disbursed_to_vendor'}
+                              onClick={async () => {
+                                const overCap = exceedsOfficerCap(c.target_amount_pkr);
+                                const canFinal = isFullApprover && !overCap;
+                                const next: CaseStatus = canFinal ? 'approved' : 'partial_approved';
+                                await onUpdateCaseStatus(
+                                  c.id,
+                                  next,
+                                  undefined,
+                                  adminSession.actorName
+                                );
+                                await onLogAudit({
+                                  actor_name: adminSession.actorName,
+                                  actor_role: actorRole,
+                                  action: canFinal ? 'APPROVED_CASE' : 'PARTIAL_APPROVED_CASE',
+                                  target_code: c.case_code,
+                                  details: formatPKR(c.target_amount_pkr),
+                                });
+                                setNotice(
+                                  canFinal
+                                    ? `Approved ${c.case_code} live!`
+                                    : `Partial Approved ${c.case_code} — awaiting Master Admin final sign-off!`
+                                );
+                              }}
+                            >
+                              {isFullApprover && !exceedsOfficerCap(c.target_amount_pkr)
+                                ? 'Approve Live'
+                                : 'Partial Approve'}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={c.status === 'rejected' || c.status === 'disbursed_to_vendor'}
+                              onClick={async () => {
+                                const reason = window.prompt(
+                                  `Rejection reason for ${c.case_code}:`,
+                                  'Incomplete vendor quotation or eligibility could not be confirmed.'
+                                );
+                                if (reason === null) return;
+                                await onUpdateCaseStatus(c.id, 'rejected', reason);
+                                await onLogAudit({
+                                  actor_name: adminSession.actorName,
+                                  actor_role: actorRole,
+                                  action: 'REJECTED_CASE',
+                                  target_code: c.case_code,
+                                  details: reason,
+                                });
+                                setNotice(`Rejected ${c.case_code}.`);
+                              }}
+                            >
+                              Reject
+                            </Button>
+                          </>
+                        )}
 
-                        {(c.status === 'approved' || c.status === 'funded') && (
+                        {isMasterAdmin && (c.status === 'approved' || c.status === 'funded') && (
                           <Button
                             variant="gold"
                             size="sm"
@@ -1293,18 +1666,27 @@ export function AdminWorkspace({
                           </Button>
                         )}
 
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={async () => {
-                            if (!window.confirm(`Delete case ${c.case_code}?`)) return;
-                            await onDeleteCase(c.id);
-                            setNotice(`Deleted case ${c.case_code}.`);
-                          }}
-                          title="Delete Case"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {canDelete && (
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={async () => {
+                              if (!window.confirm(`Delete case ${c.case_code}?`)) return;
+                              await onDeleteCase(c.id);
+                              await onLogAudit({
+                                actor_name: adminSession.actorName,
+                                actor_role: actorRole,
+                                action: 'DELETED_CASE',
+                                target_code: c.case_code,
+                                details: c.district,
+                              });
+                              setNotice(`Deleted case ${c.case_code}.`);
+                            }}
+                            title="Delete Case"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                   );
@@ -1313,7 +1695,16 @@ export function AdminWorkspace({
             </Card>
           </div>
         </div>
-      ) : (
+      ) : tab === 'officers' && isMasterAdmin ? (
+        <BoardOfficersTab
+          officers={officers}
+          auditLogs={auditLogs}
+          onCreateOfficer={onCreateOfficer}
+          onUpdateOfficer={onUpdateOfficer}
+          onResetOfficerPassword={onResetOfficerPassword}
+          onNotice={setNotice}
+        />
+      ) : isMasterAdmin ? (
         /* Dedicated Settings, Social Media, Escrow Accounts & Telegram 2FA Tab */
         <form onSubmit={handleSaveAllSettings} className="space-y-6">
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-xs text-emerald-950 flex items-center gap-2.5">
@@ -2133,7 +2524,7 @@ export function AdminWorkspace({
             </div>
           </Card>
         </form>
-      )}
+      ) : null}
 
       <VolunteerPostModal
         welfareCase={volunteerPostCase}

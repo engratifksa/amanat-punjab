@@ -1,4 +1,9 @@
-import type { CrowdfundingCampaign, Donation, WelfareCase } from '@/types/amanat';
+import type {
+  AdminAuditLog,
+  CrowdfundingCampaign,
+  Donation,
+  WelfareCase,
+} from '@/types/amanat';
 
 function csvCell(val: unknown): string {
   const s = val === null || val === undefined ? '' : String(val);
@@ -164,4 +169,17 @@ export function exportFullAuditLedgerCsv(
     ];
   });
   downloadCsvFile(`Amanat-Full-Audit-Ledger-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+}
+
+export function exportAuditLogsCsv(logs: AdminAuditLog[]) {
+  const headers = ['Timestamp', 'Actor Name', 'Actor Role', 'Action', 'Target Code', 'Details'];
+  const rows = logs.map((l) => [
+    l.created_at,
+    l.actor_name,
+    l.actor_role,
+    l.action,
+    l.target_code,
+    l.details,
+  ]);
+  downloadCsvFile(`Amanat-Admin-Audit-Trail-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
 }

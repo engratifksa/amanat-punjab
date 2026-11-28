@@ -30,6 +30,7 @@ export type CaseStatus =
   | 'pending_admin_review'
   | 'pending_field_visit'
   | 'field_verified'
+  | 'partial_approved'
   | 'approved'
   | 'funded'
   | 'disbursed_to_vendor'
@@ -44,9 +45,43 @@ export type PaymentChannel =
 
 export type DonationStatus =
   | 'pledged_pending_verify'
+  | 'partial_approved'
   | 'confirmed'
   | 'paid_to_vendor'
   | 'rejected';
+
+export type OfficerPermissionTier = 'partial_approve' | 'full_approve';
+
+export interface AdminOfficer {
+  id: string;
+  full_name: string;
+  cnic_number: string;
+  phone: string;
+  email: string;
+  username: string;
+  password_hash: string;
+  permission_tier: OfficerPermissionTier;
+  district_scope: string; // 'all' or specific Punjab district name
+  max_approval_pkr: number | null; // null = unlimited (for full_approve)
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AdminAuditLog {
+  id: string;
+  actor_name: string;
+  actor_role: 'master_admin' | 'officer_partial' | 'officer_full';
+  action: string;
+  target_code: string;
+  details: string;
+  created_at: string;
+}
+
+export interface AdminSessionInfo {
+  role: 'master_admin' | 'officer';
+  actorName: string;
+  officer?: AdminOfficer | null;
+}
 
 export interface Profile {
   id: string;
@@ -123,6 +158,7 @@ export interface WelfareCase {
   prior_application_count?: number;
   prior_served_pkr?: number;
   prior_case_codes?: string | null;
+  partial_approved_by?: string | null;
   is_demo?: boolean;
 }
 
@@ -161,6 +197,7 @@ export interface Donation {
   rejection_reason?: string | null;
   payment_proof_hash?: string | null;
   normalized_tx_ref?: string | null;
+  partial_approved_by?: string | null;
   is_demo?: boolean;
 }
 
@@ -236,6 +273,8 @@ export interface AppSettings {
   telegram_config: TelegramSecurityConfig;
   email_gateway?: EmailGatewayConfig;
   admin_password_hash: string;
+  recovery_code_hash?: string | null;
+  recovery_expires_at?: string | null;
   updated_at: string;
 }
 

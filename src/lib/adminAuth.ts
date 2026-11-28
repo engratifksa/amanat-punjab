@@ -1,4 +1,4 @@
-import type { TelegramSecurityConfig } from '@/types/amanat';
+import type { AdminOfficer, AdminSessionInfo, TelegramSecurityConfig } from '@/types/amanat';
 
 const SESSION_KEY = 'amanat_admin_session_v1';
 const SESSION_DURATION_MS = 30 * 60 * 1000; // 30 minutes inactivity/session limit
@@ -97,24 +97,45 @@ export async function sendTelegramOtp(
   };
 }
 
-export function setAdminSession(): void {
+export function setAdminSession(info?: AdminSessionInfo): void {
   const expiresAt = Date.now() + SESSION_DURATION_MS;
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify({ authenticated: true, expiresAt }));
+  const payload: { authenticated: boolean; expiresAt: number } & AdminSessionInfo = {
+    authenticated: true,
+    expiresAt,
+    role: info?.role ?? 'master_admin',
+    actorName: info?.actorName ?? 'Master Admin',
+    officer: info?.officer ?? null,
+  };
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+}
+
+export function getAdminSession(): AdminSessionInfo | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      authenticated: boolean;
+      expiresAt: number;
+      role?: 'master_admin' | 'officer';
+      actorName?: string;
+      officer?: AdminOfficer | null;
+    };
+    if (parsed.authenticated && Date.now() < parsed.expiresAt) {
+      return {
+        role: parsed.role ?? 'master_admin',
+        actorName: parsed.actorName ?? 'Master Admin',
+        officer: parsed.officer ?? null,
+      };
+    }
+    sessionStorage.removeItem(SESSION_KEY);
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export function hasValidAdminSession(): boolean {
-  try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw) as { authenticated: boolean; expiresAt: number };
-    if (parsed.authenticated && Date.now() < parsed.expiresAt) {
-      return true;
-    }
-    sessionStorage.removeItem(SESSION_KEY);
-    return false;
-  } catch {
-    return false;
-  }
+  return getAdminSession() !== null;
 }
 
 export function clearAdminSession(): void {
