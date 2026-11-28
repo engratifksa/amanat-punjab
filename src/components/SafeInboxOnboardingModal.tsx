@@ -56,7 +56,7 @@ export function SafeInboxOnboardingModal({
       'FN:Amanat Direct Welfare (Official)',
       'ORG:Amanat Direct Welfare Escrow (Punjab)',
       `EMAIL;TYPE=INTERNET:${officialEmail}`,
-      'URL:https://amanat-punjab.vercel.app',
+      'URL:https://amanatpunjab.org',
       'NOTE:Official Amanat Escrow Receipts, Visit PINs & Milestone Alerts (0% Fee).',
       'END:VCARD',
     ].join('\r\n');

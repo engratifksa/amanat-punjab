@@ -2,7 +2,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import imageCompression from 'browser-image-compression';
 
-export const DEFAULT_PUBLIC_APP_URL = 'https://amanat-punjab.vercel.app';
+export const DEFAULT_PUBLIC_APP_URL = 'https://amanatpunjab.org';
 
 export function getPublicAppUrl(): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
