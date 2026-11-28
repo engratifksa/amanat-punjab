@@ -117,11 +117,15 @@ interface AdminWorkspaceProps {
     permission_tier: OfficerPermissionTier;
     district_scope: string;
     max_approval_pkr: number | null;
+    telegram_chat_id?: string | null;
   }) => Promise<AdminOfficer>;
   onUpdateOfficer: (
     id: string,
     patch: Partial<
-      Pick<AdminOfficer, 'is_active' | 'permission_tier' | 'district_scope' | 'max_approval_pkr'>
+      Pick<
+        AdminOfficer,
+        'is_active' | 'permission_tier' | 'district_scope' | 'max_approval_pkr' | 'telegram_chat_id'
+      >
     >,
     auditDetails: string
   ) => Promise<void>;

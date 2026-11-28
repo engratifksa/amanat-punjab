@@ -235,14 +235,9 @@ export async function dispatchMultiChannelNotification(
     }
   }
 
-  // 2. Live Telegram Bot API dispatch (if Bot Token + target chat IDs exist)
+  // 2. Live Telegram Bot API dispatch — strictly role-targeted (NO blind Admin fallback!)
   const botToken = settings.telegram_config.botToken.trim();
-  const tgTargets =
-    record.recipient_telegram_ids.length > 0
-      ? record.recipient_telegram_ids
-      : settings.telegram_config.chatId.trim()
-      ? [settings.telegram_config.chatId.trim()]
-      : [];
+  const tgTargets = record.recipient_telegram_ids;
 
   if (botToken && tgTargets.length > 0) {
     let okCount = 0;

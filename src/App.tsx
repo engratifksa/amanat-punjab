@@ -35,6 +35,10 @@ import { DonorDashboard } from '@/components/DonorDashboard';
 import { VerifierQrScannerModal } from '@/components/VerifierQrScannerModal';
 import { ReceiptVerifyModal } from '@/components/ReceiptVerifyModal';
 import { SocialShareModal, type ShareableItem } from '@/components/SocialShareModal';
+import {
+  SafeInboxOnboardingModal,
+  SAFE_INBOX_KEY_PREFIX,
+} from '@/components/SafeInboxOnboardingModal';
 import { SocialBar } from '@/components/SocialBar';
 import { MobileBottomNav } from '@/components/MobileBottomNav';
 
@@ -72,6 +76,7 @@ export default function App() {
   const [authModalRole, setAuthModalRole] = useState<'donor' | 'beneficiary' | 'verifier' | null>(
     null
   );
+  const [showSafeInboxModal, setShowSafeInboxModal] = useState(false);
 
   const [language, setLanguage] = useState<'en' | 'ur'>('en');
   const [caseFilter, setCaseFilter] = useState<CaseFilterKey>('all');
@@ -191,6 +196,12 @@ export default function App() {
       };
       setCurrentUser(authSession);
       localStorage.setItem(USER_SESSION_KEY, JSON.stringify(authSession));
+      if (
+        authSession.email &&
+        !localStorage.getItem(`${SAFE_INBOX_KEY_PREFIX}${authSession.email.toLowerCase()}`)
+      ) {
+        setShowSafeInboxModal(true);
+      }
       if (pending.role) {
         setActiveRole(pending.role);
       }
@@ -272,6 +283,12 @@ export default function App() {
     localStorage.setItem(USER_SESSION_KEY, JSON.stringify(enriched));
     setAuthModalRole(null);
     setActiveRole(enriched.role);
+    if (
+      enriched.email &&
+      !localStorage.getItem(`${SAFE_INBOX_KEY_PREFIX}${enriched.email.toLowerCase()}`)
+    ) {
+      setShowSafeInboxModal(true);
+    }
   };
 
   const handleSignOutUser = () => {
@@ -424,7 +441,14 @@ export default function App() {
             currentUser={currentUser}
             profiles={profiles}
             onOpenAuth={() => setAuthModalRole('verifier')}
-            onApplyAsVerifier={async ({ district, tehsil, cnic_number, phone, photo_url }) => {
+            onApplyAsVerifier={async ({
+              district,
+              tehsil,
+              cnic_number,
+              phone,
+              photo_url,
+              telegram_chat_id,
+            }) => {
               if (!currentUser) return;
               const prof = await dataClient.upsertUserProfile({
                 auth_user_id: currentUser.id,
@@ -435,6 +459,7 @@ export default function App() {
                 cnic_number,
                 phone,
                 photo_url,
+                telegram_chat_id,
                 role: 'verifier',
                 applyAsVerifier: true,
               });
@@ -725,6 +750,36 @@ export default function App() {
       />
 
       <SocialShareModal item={shareItem} onClose={() => setShareItem(null)} />
+
+      {currentUser && (
+        <SafeInboxOnboardingModal
+          isOpen={showSafeInboxModal}
+          userEmail={currentUser.email}
+          userName={currentUser.full_name}
+          officialEmail={
+            settings.email_gateway?.senderEmail ||
+            settings.social_links.email ||
+            'support.amanat@gmail.com'
+          }
+          onSaveTelegramId={async (tgId) => {
+            await dataClient.upsertUserProfile({
+              auth_user_id: currentUser.id,
+              email: currentUser.email,
+              full_name: currentUser.full_name,
+              telegram_chat_id: tgId,
+            });
+            await refreshData();
+          }}
+          onComplete={() => {
+            localStorage.setItem(
+              `${SAFE_INBOX_KEY_PREFIX}${currentUser.email.toLowerCase()}`,
+              'done'
+            );
+            setShowSafeInboxModal(false);
+          }}
+          onDismissLater={() => setShowSafeInboxModal(false)}
+        />
+      )}
     </div>
   );
 }

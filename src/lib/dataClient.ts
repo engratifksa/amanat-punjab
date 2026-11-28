@@ -561,24 +561,32 @@ export const dataClient = {
 
   async sendTestMilestoneNotification(): Promise<NotificationRecord> {
     await ensureLocalSeeded();
-    return await emitNotification({
-      event_type: 'funding_milestone',
-      audience: 'both',
-      target_code: 'AMN-TEST-75',
-      case_id: null,
-      campaign_id: 'camp-1',
-      milestone_pct: 75,
-      title_en: '75% Major Milestone Reached — Test Broadcast',
-      title_ur: '75% اہم ہدف مکمل — آزمائشی اطلاع',
-      body_en:
-        'Your 3-channel Amanat notification pipeline (In-App, Gmail support.amanat@gmail.com, and Telegram) is active and ready for major milestone updates.',
-      body_ur:
-        'امانت کا سہ فریقی اطلاعی نظام (ایپ، جی میل اور ٹیلیگرام) فعال ہے اور اہم اہداف کی تکمیل پر خودکار پیغامات بھیجے گا۔',
-      vendor_name: 'Al-Madina Home Essentials & Furniture, Kasur',
-      district: 'Kasur',
-      collected_pkr: 937500,
-      target_pkr: 1250000,
-    });
+    const activeSettings = await getActiveSettings();
+    const adminTg = activeSettings.telegram_config.chatId?.trim()
+      ? [activeSettings.telegram_config.chatId.trim()]
+      : [];
+    return await emitNotification(
+      {
+        event_type: 'funding_milestone',
+        audience: 'both',
+        target_code: 'AMN-TEST-75',
+        case_id: null,
+        campaign_id: 'camp-1',
+        milestone_pct: 75,
+        title_en: '75% Major Milestone Reached — Test Broadcast',
+        title_ur: '75% اہم ہدف مکمل — آزمائشی اطلاع',
+        body_en:
+          'Your 3-channel Amanat notification pipeline (In-App, Gmail support.amanat@gmail.com, and Telegram) is active and ready for major milestone updates.',
+        body_ur:
+          'امانت کا سہ فریقی اطلاعی نظام (ایپ، جی میل اور ٹیلیگرام) فعال ہے اور اہم اہداف کی تکمیل پر خودکار پیغامات بھیجے گا۔',
+        vendor_name: 'Al-Madina Home Essentials & Furniture, Kasur',
+        district: 'Kasur',
+        collected_pkr: 937500,
+        target_pkr: 1250000,
+      },
+      [],
+      adminTg
+    );
   },
 
   async saveAppSettings(nextSettings: AppSettings): Promise<AppSettings> {
@@ -987,7 +995,7 @@ export const dataClient = {
           },
           benEmails
         );
-        if (verifierProfile?.email) {
+        if (verifierProfile?.email || verifierProfile?.telegram_chat_id) {
           await emitNotification(
             {
               event_type: 'case_submitted',
@@ -1002,7 +1010,8 @@ export const dataClient = {
               vendor_name: (c as WelfareCase).vendor_name,
               district: (c as WelfareCase).district,
             },
-            [verifierProfile.email]
+            verifierProfile.email ? [verifierProfile.email] : [],
+            verifierProfile.telegram_chat_id ? [verifierProfile.telegram_chat_id] : []
           );
         }
       }
@@ -1044,6 +1053,7 @@ export const dataClient = {
     phone?: string | null;
     cnic_number?: string | null;
     photo_url?: string | null;
+    telegram_chat_id?: string | null;
     applyAsVerifier?: boolean;
   }): Promise<Profile> {
     await ensureLocalSeeded();
@@ -1091,6 +1101,9 @@ export const dataClient = {
           email: existing.email || cleanEmail,
           auth_user_id: existing.auth_user_id || validAuthUuid || null,
         };
+        if (input.telegram_chat_id?.trim()) {
+          patch.telegram_chat_id = input.telegram_chat_id.trim();
+        }
         if (input.applyAsVerifier) {
           patch.role = 'verifier';
           patch.verifier_applied = true;
@@ -1125,6 +1138,7 @@ export const dataClient = {
         cnic_hash: `google:${cleanEmail}`,
         cnic_number: input.cnic_number || null,
         photo_url: uploadedPhoto || null,
+        telegram_chat_id: input.telegram_chat_id?.trim() || null,
         is_accredited_verifier: false,
         verifier_applied: Boolean(input.applyAsVerifier),
         verifier_badge_title: input.applyAsVerifier
@@ -1650,7 +1664,7 @@ export const dataClient = {
           .eq('id', profileId)
           .maybeSingle();
         const vp = prof as Profile | null;
-        if (vp?.email) {
+        if (vp?.email || vp?.telegram_chat_id) {
           await emitNotification(
             {
               event_type: 'field_verified',
@@ -1665,7 +1679,8 @@ export const dataClient = {
               vendor_name: 'Amanat Verification Board',
               district: vp.district,
             },
-            [vp.email]
+            vp.email ? [vp.email] : [],
+            vp.telegram_chat_id ? [vp.telegram_chat_id] : []
           );
         }
       }
@@ -2599,6 +2614,7 @@ export const dataClient = {
     permission_tier: OfficerPermissionTier;
     district_scope: string;
     max_approval_pkr: number | null;
+    telegram_chat_id?: string | null;
   }): Promise<AdminOfficer> {
     if (!supabase) throw new Error('Supabase required to create Board Officers.');
     const cleanUsername = input.username.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
@@ -2620,6 +2636,7 @@ export const dataClient = {
       permission_tier: input.permission_tier,
       district_scope: input.district_scope || 'all',
       max_approval_pkr: input.max_approval_pkr,
+      telegram_chat_id: input.telegram_chat_id?.trim() || null,
       is_active: true,
       created_at: new Date().toISOString(),
     };
@@ -2643,8 +2660,8 @@ export const dataClient = {
       details: `${officer.full_name} · Tier: ${officer.permission_tier} · Scope: ${officer.district_scope}${officer.max_approval_pkr ? ` · Cap: PKR ${officer.max_approval_pkr.toLocaleString('en-PK')}` : ''}`,
     });
 
-    // Email credentials cleanly to the new Board Officer
-    if (officer.email) {
+    // Send Welcome strictly to the Board Officer's Email & Telegram ID (never Admin's Telegram!)
+    if (officer.email || officer.telegram_chat_id) {
       await emitNotification(
         {
           event_type: 'case_submitted',
@@ -2659,7 +2676,8 @@ export const dataClient = {
           vendor_name: 'Amanat Verification Board',
           district: officer.district_scope === 'all' ? 'Punjab' : officer.district_scope,
         },
-        [officer.email]
+        officer.email ? [officer.email] : [],
+        officer.telegram_chat_id ? [officer.telegram_chat_id] : []
       );
     }
 
@@ -2669,7 +2687,10 @@ export const dataClient = {
   async updateAdminOfficer(
     id: string,
     patch: Partial<
-      Pick<AdminOfficer, 'is_active' | 'permission_tier' | 'district_scope' | 'max_approval_pkr'>
+      Pick<
+        AdminOfficer,
+        'is_active' | 'permission_tier' | 'district_scope' | 'max_approval_pkr' | 'telegram_chat_id'
+      >
     >,
     auditDetails: string
   ): Promise<void> {

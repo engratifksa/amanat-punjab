@@ -30,6 +30,7 @@ import {
 } from './LocationPinPicker';
 import { SmartImageCapture } from './SmartImageCapture';
 import { VerifierDynamicIdCard } from './DigitalCards';
+import { TelegramGuideModal } from './TelegramGuideModal';
 import { PUNJAB_DISTRICTS } from '@/lib/seedData';
 
 interface VerifierWorkspaceProps {
@@ -42,6 +43,7 @@ interface VerifierWorkspaceProps {
     cnic_number: string;
     phone: string;
     photo_url: string;
+    telegram_chat_id?: string | null;
   }) => Promise<void>;
   cases: WelfareCase[];
   verifications: FieldVerification[];
@@ -90,6 +92,8 @@ export function VerifierWorkspace({
   const [applyCnic, setApplyCnic] = useState('');
   const [applyPhone, setApplyPhone] = useState('');
   const [applyPhoto, setApplyPhoto] = useState<string | null>(null);
+  const [applyTelegramId, setApplyTelegramId] = useState('');
+  const [showTgGuide, setShowTgGuide] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [enteredHandshakePin, setEnteredHandshakePin] = useState('');
@@ -210,6 +214,26 @@ export function VerifierWorkspace({
                 placeholder="0300-1234567"
               />
             </div>
+            <div className="sm:col-span-2">
+              <div className="mb-1 flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-700">
+                  Telegram Chat ID (Optional — Instant Visit Assignment Alerts)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowTgGuide(true)}
+                  className="text-[11px] font-extrabold text-sky-700 hover:underline"
+                >
+                  How to get Telegram ID?
+                </button>
+              </div>
+              <Input
+                value={applyTelegramId}
+                onChange={(e) => setApplyTelegramId(e.target.value.replace(/\D/g, ''))}
+                placeholder="e.g. 987654321"
+                className="font-mono"
+              />
+            </div>
           </div>
 
           <SmartImageCapture
@@ -253,6 +277,7 @@ export function VerifierWorkspace({
                   cnic_number: applyCnic,
                   phone: applyPhone.trim(),
                   photo_url: applyPhoto,
+                  telegram_chat_id: applyTelegramId.trim() || null,
                 });
               } catch (err) {
                 setApplyError(
@@ -267,6 +292,7 @@ export function VerifierWorkspace({
             <span>{applying ? 'Submitting...' : 'Submit Volunteer Verifier Application'}</span>
           </Button>
         </Card>
+        <TelegramGuideModal isOpen={showTgGuide} onClose={() => setShowTgGuide(false)} />
       </div>
     );
   }

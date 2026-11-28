@@ -63,6 +63,7 @@ export interface AdminOfficer {
   permission_tier: OfficerPermissionTier;
   district_scope: string; // 'all' or specific Punjab district name
   max_approval_pkr: number | null; // null = unlimited (for full_approve)
+  telegram_chat_id?: string | null;
   is_active: boolean;
   created_at: string;
 }
@@ -99,6 +100,7 @@ export interface Profile {
   verifier_qr_secret?: string | null;
   photo_url?: string | null;
   cnic_number?: string | null;
+  telegram_chat_id?: string | null;
   is_demo?: boolean;
 }
 

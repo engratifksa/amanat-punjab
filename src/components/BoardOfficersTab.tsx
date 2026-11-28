@@ -8,12 +8,14 @@ import {
   Download,
   History,
   MapPin,
+  Send,
 } from 'lucide-react';
 import type { AdminAuditLog, AdminOfficer, OfficerPermissionTier } from '@/types/amanat';
 import { PUNJAB_DISTRICTS } from '@/lib/seedData';
 import { formatCnicInput, formatPKR } from '@/lib/utils';
 import { exportAuditLogsCsv } from '@/lib/csvExport';
 import { Badge, Button, Card, Input, Select } from './ui/primitives';
+import { TelegramGuideModal } from './TelegramGuideModal';
 
 interface BoardOfficersTabProps {
   officers: AdminOfficer[];
@@ -28,11 +30,15 @@ interface BoardOfficersTabProps {
     permission_tier: OfficerPermissionTier;
     district_scope: string;
     max_approval_pkr: number | null;
+    telegram_chat_id?: string | null;
   }) => Promise<AdminOfficer>;
   onUpdateOfficer: (
     id: string,
     patch: Partial<
-      Pick<AdminOfficer, 'is_active' | 'permission_tier' | 'district_scope' | 'max_approval_pkr'>
+      Pick<
+        AdminOfficer,
+        'is_active' | 'permission_tier' | 'district_scope' | 'max_approval_pkr' | 'telegram_chat_id'
+      >
     >,
     auditDetails: string
   ) => Promise<void>;
@@ -57,6 +63,8 @@ export function BoardOfficersTab({
   const [tier, setTier] = useState<OfficerPermissionTier>('partial_approve');
   const [districtScope, setDistrictScope] = useState('all');
   const [maxCapPkr, setMaxCapPkr] = useState('');
+  const [officerTelegramId, setOfficerTelegramId] = useState('');
+  const [showTgGuide, setShowTgGuide] = useState(false);
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -81,6 +89,7 @@ export function BoardOfficersTab({
         permission_tier: tier,
         district_scope: districtScope,
         max_approval_pkr: capNum,
+        telegram_chat_id: officerTelegramId.trim() || null,
       });
       setFullName('');
       setCnic('');
@@ -89,6 +98,7 @@ export function BoardOfficersTab({
       setUsername('');
       setPassword('');
       setMaxCapPkr('');
+      setOfficerTelegramId('');
       onNotice(
         `Created Board Officer "${created.full_name}" (username: ${created.username}). Welcome email dispatched to ${created.email}.`
       );
@@ -229,6 +239,27 @@ export function BoardOfficersTab({
             )}
           </div>
 
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-700">
+                Officer Telegram Chat ID (Optional — for direct alerts)
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowTgGuide(true)}
+                className="text-[11px] font-extrabold text-sky-700 hover:underline"
+              >
+                How to get Telegram ID?
+              </button>
+            </div>
+            <Input
+              value={officerTelegramId}
+              onChange={(e) => setOfficerTelegramId(e.target.value.replace(/\D/g, ''))}
+              placeholder="e.g. 987654321 (Officer must tap START on @AmanatTelegramBot)"
+              className="font-mono"
+            />
+          </div>
+
           {formError && (
             <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-800">
               {formError}
@@ -283,6 +314,17 @@ export function BoardOfficersTab({
                       <p className="text-slate-600">
                         CNIC: <span className="font-mono font-bold">{off.cnic_number}</span> ·{' '}
                         {off.phone} · {off.email}
+                        {off.telegram_chat_id ? (
+                          <>
+                            {' '}
+                            · TG:{' '}
+                            <span className="font-mono font-bold text-sky-700">
+                              {off.telegram_chat_id}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-slate-400"> · No Telegram ID</span>
+                        )}
                       </p>
                       <p className="text-[11px] text-emerald-800 font-semibold flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center gap-1">
@@ -321,6 +363,33 @@ export function BoardOfficersTab({
                     >
                       Switch to{' '}
                       {off.permission_tier === 'full_approve' ? 'Tier 1 (Partial)' : 'Tier 2 (Full)'}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const nextTg = window.prompt(
+                          `Enter Telegram Chat ID for @${off.username} (leave blank to clear):`,
+                          off.telegram_chat_id ?? ''
+                        );
+                        if (nextTg === null) return;
+                        const cleanTg = nextTg.replace(/\D/g, '') || null;
+                        await onUpdateOfficer(
+                          off.id,
+                          { telegram_chat_id: cleanTg },
+                          `Updated @${off.username} Telegram ID to ${cleanTg || 'none'}`
+                        );
+                        onNotice(
+                          cleanTg
+                            ? `Saved Telegram ID ${cleanTg} for @${off.username}.`
+                            : `Cleared Telegram ID for @${off.username}.`
+                        );
+                      }}
+                    >
+                      <Send className="h-3.5 w-3.5 text-sky-600" />
+                      {off.telegram_chat_id ? 'Edit Telegram' : 'Add Telegram ID'}
                     </Button>
 
                     <Button
@@ -434,6 +503,8 @@ export function BoardOfficersTab({
           )}
         </Card>
       </div>
+
+      <TelegramGuideModal isOpen={showTgGuide} onClose={() => setShowTgGuide(false)} />
     </div>
   );
 }
