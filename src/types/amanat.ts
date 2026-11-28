@@ -18,6 +18,8 @@ export type CaseCategory =
 
 export type FundingType = 'zakat_eligible' | 'sadaqah_general';
 
+export type VideoPrivacyMode = 'identity_protected' | 'family_consented';
+
 export type CampaignStatus =
   | 'draft'
   | 'active'
@@ -124,6 +126,9 @@ export interface CrowdfundingCampaign {
   deadline_date: string;
   status: CampaignStatus;
   created_at: string;
+  video_enabled?: boolean;
+  video_url?: string | null;
+  video_privacy_mode?: VideoPrivacyMode;
   is_demo?: boolean;
 }
 
@@ -161,6 +166,9 @@ export interface WelfareCase {
   prior_served_pkr?: number;
   prior_case_codes?: string | null;
   partial_approved_by?: string | null;
+  video_enabled?: boolean;
+  video_url?: string | null;
+  video_privacy_mode?: VideoPrivacyMode;
   is_demo?: boolean;
 }
 
@@ -200,6 +208,9 @@ export interface Donation {
   payment_proof_hash?: string | null;
   normalized_tx_ref?: string | null;
   partial_approved_by?: string | null;
+  video_enabled?: boolean;
+  video_url?: string | null;
+  video_privacy_mode?: VideoPrivacyMode;
   is_demo?: boolean;
 }
 

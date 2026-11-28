@@ -224,6 +224,9 @@ export interface CreateCampaignInput {
   vendor_name: string;
   vendor_invoice_url?: string;
   deadline_date: string;
+  video_enabled?: boolean;
+  video_url?: string | null;
+  video_privacy_mode?: 'identity_protected' | 'family_consented';
 }
 
 export interface CreateCaseInput {
@@ -644,6 +647,9 @@ export const dataClient = {
       deadline_date: input.deadline_date,
       status: 'active',
       created_at: new Date().toISOString(),
+      video_enabled: Boolean(input.video_enabled && input.video_url?.trim()),
+      video_url: input.video_url?.trim() || null,
+      video_privacy_mode: input.video_privacy_mode ?? 'identity_protected',
       is_demo: isDemoMode,
     };
 
@@ -702,6 +708,55 @@ export const dataClient = {
       return;
     }
     await localDb.crowdfunding_campaigns.update(id, { status });
+  },
+
+  async updateCampaignVideo(
+    id: string,
+    payload: {
+      video_enabled: boolean;
+      video_url: string | null;
+      video_privacy_mode: 'identity_protected' | 'family_consented';
+    }
+  ): Promise<void> {
+    await ensureLocalSeeded();
+    const cleanUrl = payload.video_url?.trim() || null;
+    const patch = {
+      video_enabled: Boolean(payload.video_enabled && cleanUrl),
+      video_url: cleanUrl,
+      video_privacy_mode: payload.video_privacy_mode,
+    };
+    if (supabase) {
+      const { error } = await supabase
+        .from('crowdfunding_campaigns')
+        .update(patch)
+        .eq('id', id);
+      if (error) throw error;
+      return;
+    }
+    await localDb.crowdfunding_campaigns.update(id, patch);
+  },
+
+  async updateCaseVideo(
+    id: string,
+    payload: {
+      video_enabled: boolean;
+      video_url: string | null;
+      video_privacy_mode: 'identity_protected' | 'family_consented';
+    }
+  ): Promise<void> {
+    await ensureLocalSeeded();
+    const cleanUrl = payload.video_url?.trim() || null;
+    const patch = {
+      video_enabled: Boolean(payload.video_enabled && cleanUrl),
+      video_url: cleanUrl,
+      video_privacy_mode: payload.video_privacy_mode,
+    };
+    if (supabase) {
+      const { error } = await supabase.from('cases').update(patch).eq('id', id);
+      if (error) throw error;
+      return;
+    }
+    await localDb.cases.update(id, patch);
   },
 
   async uploadCampaignPaidReceipt(id: string, receiptUrl: string): Promise<void> {

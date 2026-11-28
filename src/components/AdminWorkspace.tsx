@@ -28,6 +28,7 @@ import {
   Database,
   Upload,
   RefreshCw,
+  Video,
 } from 'lucide-react';
 import { VolunteerPostModal } from './VolunteerPostModal';
 import { TelegramGuideModal } from './TelegramGuideModal';
@@ -61,6 +62,7 @@ import type {
   NotificationRecord,
   OfficerPermissionTier,
   Profile,
+  VideoPrivacyMode,
   WelfareCase,
 } from '@/types/amanat';
 import { PUNJAB_DISTRICTS, makeInvoiceDataUrl } from '@/lib/seedData';
@@ -93,6 +95,22 @@ interface AdminWorkspaceProps {
     deadline_date: string;
   }) => Promise<CrowdfundingCampaign>;
   onUpdateCampaignStatus: (id: string, status: CampaignStatus) => Promise<void>;
+  onUpdateCampaignVideo: (
+    id: string,
+    payload: {
+      video_enabled: boolean;
+      video_url: string | null;
+      video_privacy_mode: VideoPrivacyMode;
+    }
+  ) => Promise<void>;
+  onUpdateCaseVideo: (
+    id: string,
+    payload: {
+      video_enabled: boolean;
+      video_url: string | null;
+      video_privacy_mode: VideoPrivacyMode;
+    }
+  ) => Promise<void>;
   onConfirmDonation: (donationId: string) => Promise<void>;
   onUpdateDonationStatus: (
     donationId: string,
@@ -169,6 +187,8 @@ export function AdminWorkspace({
   settings,
   onCreateCampaign,
   onUpdateCampaignStatus,
+  onUpdateCampaignVideo,
+  onUpdateCaseVideo,
   onConfirmDonation,
   onUpdateDonationStatus,
   onApproveCase,
@@ -219,6 +239,15 @@ export function AdminWorkspace({
   );
   const [donationFilter, setDonationFilter] = useState<'all' | DonationStatus>('all');
   const [notice, setNotice] = useState<string | null>(null);
+  const [videoEditorTarget, setVideoEditorTarget] = useState<{
+    type: 'campaign' | 'case';
+    id: string;
+    code: string;
+    video_enabled: boolean;
+    video_url: string;
+    video_privacy_mode: VideoPrivacyMode;
+  } | null>(null);
+  const [savingVideo, setSavingVideo] = useState(false);
 
   useEffect(() => {
     if (!isMasterAdmin && tab !== 'audit') {
@@ -877,6 +906,24 @@ export function AdminWorkspace({
                         Pause
                       </Button>
                     )}
+                    <Button
+                      variant={camp.video_enabled && camp.video_url ? 'primary' : 'outline'}
+                      size="sm"
+                      onClick={() =>
+                        setVideoEditorTarget({
+                          type: 'campaign',
+                          id: camp.id,
+                          code: camp.campaign_code,
+                          video_enabled: Boolean(camp.video_enabled),
+                          video_url: camp.video_url ?? '',
+                          video_privacy_mode: camp.video_privacy_mode ?? 'identity_protected',
+                        })
+                      }
+                      title="Configure Verified Ground Video (ON/OFF)"
+                    >
+                      <Video className="h-3.5 w-3.5" />
+                      {camp.video_enabled && camp.video_url ? 'Video: ON' : 'Video: OFF'}
+                    </Button>
                     {camp.status === 'paused' && (
                       <Button
                         variant="primary"
@@ -1667,6 +1714,27 @@ export function AdminWorkspace({
                             }}
                           >
                             Mark Paid
+                          </Button>
+                        )}
+
+                        {isFullApprover && (
+                          <Button
+                            variant={c.video_enabled && c.video_url ? 'primary' : 'outline'}
+                            size="sm"
+                            onClick={() =>
+                              setVideoEditorTarget({
+                                type: 'case',
+                                id: c.id,
+                                code: c.case_code,
+                                video_enabled: Boolean(c.video_enabled),
+                                video_url: c.video_url ?? '',
+                                video_privacy_mode: c.video_privacy_mode ?? 'identity_protected',
+                              })
+                            }
+                            title="Configure Verified Ground Video (ON/OFF)"
+                          >
+                            <Video className="h-3.5 w-3.5" />
+                            {c.video_enabled && c.video_url ? 'Video: ON' : 'Video: OFF'}
                           </Button>
                         )}
 
@@ -2539,6 +2607,168 @@ export function AdminWorkspace({
         isOpen={showTelegramGuide}
         onClose={() => setShowTelegramGuide(false)}
       />
+
+      {/* Video Content ON/OFF & Link Configuration Modal (Master Admin & Tier 2 Full Approvers) */}
+      {videoEditorTarget && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-emerald-950/70 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Configure Video Content for ${videoEditorTarget.code}`}
+          onClick={() => setVideoEditorTarget(null)}
+        >
+          <div
+            className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-glass-lg border border-emerald-900/20"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 bg-emerald-950 px-5 py-4 text-white">
+              <div>
+                <Badge
+                  variant="gold"
+                  className="mb-1.5 bg-gold-500/20 text-gold-200 border-gold-400/30"
+                >
+                  <Video className="h-3.5 w-3.5" />
+                  Video Content Control · {videoEditorTarget.code}
+                </Badge>
+                <h3 className="text-base font-extrabold">
+                  Enable / Disable Ground Video Story
+                </h3>
+                <p className="text-[11px] text-emerald-200/85 mt-0.5">
+                  When ON, a glowing Watch Video button appears on the Landing Page card.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVideoEditorTarget(null)}
+                aria-label="Close Video Editor"
+                className="rounded-xl bg-white/10 p-1.5 hover:bg-white/20"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <label className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3.5 cursor-pointer">
+                <div>
+                  <p className="text-xs font-extrabold text-emerald-950">
+                    Show Glowing Video Button on Landing Page
+                  </p>
+                  <p className="text-[11px] text-slate-600">
+                    Turn OFF anytime to immediately hide the video from donors.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={videoEditorTarget.video_enabled}
+                  onChange={(e) =>
+                    setVideoEditorTarget((prev) =>
+                      prev ? { ...prev, video_enabled: e.target.checked } : null
+                    )
+                  }
+                  className="h-5 w-5 rounded border-emerald-400 text-emerald-700"
+                />
+              </label>
+
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-700">
+                  Video Link (YouTube, YouTube Shorts, Google Drive, Vimeo, Facebook, or TikTok)
+                </label>
+                <Input
+                  type="url"
+                  value={videoEditorTarget.video_url}
+                  onChange={(e) =>
+                    setVideoEditorTarget((prev) =>
+                      prev ? { ...prev, video_url: e.target.value } : null
+                    )
+                  }
+                  placeholder="https://youtu.be/... or https://drive.google.com/file/d/..."
+                />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  YouTube &amp; Google Drive links embed natively inside Amanat ($0 bandwidth cost).
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-700">
+                  Dignity &amp; Privacy Classification (Shown on Video Player)
+                </label>
+                <Select
+                  value={videoEditorTarget.video_privacy_mode}
+                  onChange={(e) =>
+                    setVideoEditorTarget((prev) =>
+                      prev
+                        ? { ...prev, video_privacy_mode: e.target.value as VideoPrivacyMode }
+                        : null
+                    )
+                  }
+                >
+                  <option value="identity_protected">
+                    Privacy Protected (No Face Shown — Situation / Vendor / Location Only)
+                  </option>
+                  <option value="family_consented">
+                    Family Consent Verified (Beneficiary Approved Personal Appearance)
+                  </option>
+                </Select>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setVideoEditorTarget(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="md"
+                  disabled={
+                    savingVideo ||
+                    (videoEditorTarget.video_enabled && !videoEditorTarget.video_url.trim())
+                  }
+                  onClick={async () => {
+                    setSavingVideo(true);
+                    try {
+                      const payload = {
+                        video_enabled: videoEditorTarget.video_enabled,
+                        video_url: videoEditorTarget.video_url.trim() || null,
+                        video_privacy_mode: videoEditorTarget.video_privacy_mode,
+                      };
+                      if (videoEditorTarget.type === 'campaign') {
+                        await onUpdateCampaignVideo(videoEditorTarget.id, payload);
+                      } else {
+                        await onUpdateCaseVideo(videoEditorTarget.id, payload);
+                      }
+                      await onLogAudit({
+                        actor_name: adminSession.actorName,
+                        actor_role: actorRole,
+                        action: payload.video_enabled ? 'VIDEO_ENABLED' : 'VIDEO_DISABLED',
+                        target_code: videoEditorTarget.code,
+                        details: payload.video_enabled
+                          ? `${payload.video_privacy_mode} · ${payload.video_url}`
+                          : 'Video content hidden from Landing Page',
+                      });
+                      setNotice(
+                        payload.video_enabled
+                          ? `Video Content turned ON for ${videoEditorTarget.code} — glowing Watch Video button is now live!`
+                          : `Video Content turned OFF for ${videoEditorTarget.code}.`
+                      );
+                      setVideoEditorTarget(null);
+                    } finally {
+                      setSavingVideo(false);
+                    }
+                  }}
+                >
+                  <Save className="h-4 w-4" />
+                  <span>{savingVideo ? 'Saving...' : 'Save Video Settings'}</span>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

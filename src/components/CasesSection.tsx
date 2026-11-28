@@ -1,11 +1,12 @@
 import { useTranslation } from 'react-i18next';
 import Tilt from 'react-parallax-tilt';
-import { Building2, CheckCircle2, MapPin, Share2, ShieldCheck, BadgeCheck } from 'lucide-react';
+import { Building2, CheckCircle2, MapPin, Share2, ShieldCheck, BadgeCheck, Video } from 'lucide-react';
 import type { DonationTarget, Profile, WelfareCase } from '@/types/amanat';
 import { Badge, Button } from './ui/primitives';
 import { DualProgressBar } from './DualProgressBar';
 import { cn } from '@/lib/utils';
 import type { ShareableItem } from './SocialShareModal';
+import type { VideoStoryItem } from './VideoStoryModal';
 
 export type CaseFilterKey =
   | 'all'
@@ -35,6 +36,7 @@ interface CasesSectionProps {
   onChangeFilter: (f: CaseFilterKey) => void;
   onDonate: (target: DonationTarget) => void;
   onShare: (item: ShareableItem) => void;
+  onWatchVideo: (item: VideoStoryItem) => void;
 }
 
 export function CasesSection({
@@ -46,6 +48,7 @@ export function CasesSection({
   onChangeFilter,
   onDonate,
   onShare,
+  onWatchVideo,
 }: CasesSectionProps) {
   const { t } = useTranslation();
 
@@ -124,7 +127,9 @@ export function CasesSection({
             target_amount_pkr: c.target_amount_pkr,
             collected_amount_pkr: c.raised_amount_pkr,
             is_completed: isClosed,
+            has_video: Boolean(c.video_enabled && c.video_url),
           });
+          const hasLiveVideo = Boolean(c.video_enabled && c.video_url);
 
           return (
             <Tilt
@@ -144,9 +149,41 @@ export function CasesSection({
               >
                 <div className="space-y-3.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-mono text-xs font-extrabold text-emerald-900 bg-emerald-100/80 px-2.5 py-1 rounded-lg">
-                      {c.case_code}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-xs font-extrabold text-emerald-900 bg-emerald-100/80 px-2.5 py-1 rounded-lg">
+                        {c.case_code}
+                      </span>
+                      {hasLiveVideo && c.video_url && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onWatchVideo({
+                              type: 'case',
+                              code: c.case_code,
+                              title_en: `${t(`categories.${c.category}`)} Support — ${c.district}`,
+                              title_ur: `${c.district} میں مستحق خاندان کی امداد (${c.case_code})`,
+                              district: c.district,
+                              vendor_name: c.vendor_name,
+                              video_url: c.video_url!,
+                              video_privacy_mode: c.video_privacy_mode,
+                              target_amount_pkr: c.target_amount_pkr,
+                              collected_amount_pkr: c.raised_amount_pkr,
+                              pledged_amount_pkr: c.pledged_amount_pkr,
+                              is_closed: isClosed,
+                            })
+                          }
+                          aria-label={`Watch verified ground video for ${c.case_code}`}
+                          className="relative inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-emerald-900 to-emerald-800 px-2.5 py-1 text-[11px] font-extrabold text-gold-200 border border-gold-400/70 shadow-[0_0_14px_rgba(245,158,11,0.55)] hover:scale-105 transition-transform"
+                        >
+                          <span className="relative flex h-2 w-2">
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-gold-400 opacity-80" />
+                            <span className="relative inline-flex h-2 w-2 rounded-full bg-gold-300" />
+                          </span>
+                          <Video className="h-3.5 w-3.5 text-gold-300" />
+                          <span>{language === 'ur' ? 'ویڈیو' : 'Watch Video'}</span>
+                        </button>
+                      )}
+                    </div>
                     <div className="flex items-center gap-1.5">
                       <Badge
                         variant={

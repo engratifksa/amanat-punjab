@@ -8,6 +8,7 @@ import {
   Share2,
   Sparkles,
   Users,
+  Video,
   CheckCircle2,
 } from 'lucide-react';
 import type { CrowdfundingCampaign, DonationTarget } from '@/types/amanat';
@@ -15,6 +16,7 @@ import { Badge, Button } from './ui/primitives';
 import { DualProgressBar } from './DualProgressBar';
 import { cn, daysUntil } from '@/lib/utils';
 import type { ShareableItem } from './SocialShareModal';
+import type { VideoStoryItem } from './VideoStoryModal';
 
 interface CampaignsSectionProps {
   campaigns: CrowdfundingCampaign[];
@@ -22,6 +24,7 @@ interface CampaignsSectionProps {
   highlightedCode?: string | null;
   onDonate: (target: DonationTarget) => void;
   onShare: (item: ShareableItem) => void;
+  onWatchVideo: (item: VideoStoryItem) => void;
 }
 
 export function CampaignsSection({
@@ -30,6 +33,7 @@ export function CampaignsSection({
   highlightedCode,
   onDonate,
   onShare,
+  onWatchVideo,
 }: CampaignsSectionProps) {
   const { t } = useTranslation();
   const visibleCampaigns = campaigns.filter(
@@ -82,7 +86,9 @@ export function CampaignsSection({
             collected_amount_pkr: camp.collected_amount_pkr,
             donor_count: camp.donor_count,
             is_completed: isLocked,
+            has_video: Boolean(camp.video_enabled && camp.video_url),
           });
+          const hasLiveVideo = Boolean(camp.video_enabled && camp.video_url);
 
           return (
             <Tilt
@@ -103,9 +109,41 @@ export function CampaignsSection({
                 <div className="space-y-4">
                   {/* Top Badges */}
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-mono text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
-                      {camp.campaign_code}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
+                        {camp.campaign_code}
+                      </span>
+                      {hasLiveVideo && camp.video_url && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onWatchVideo({
+                              type: 'campaign',
+                              code: camp.campaign_code,
+                              title_en: camp.title_en,
+                              title_ur: camp.title_ur,
+                              district: camp.district,
+                              vendor_name: camp.vendor_name,
+                              video_url: camp.video_url!,
+                              video_privacy_mode: camp.video_privacy_mode,
+                              target_amount_pkr: camp.target_amount_pkr,
+                              collected_amount_pkr: camp.collected_amount_pkr,
+                              pledged_amount_pkr: camp.pledged_amount_pkr,
+                              is_closed: isLocked,
+                            })
+                          }
+                          aria-label={`Watch verified ground video for ${camp.campaign_code}`}
+                          className="relative inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-emerald-900 to-emerald-800 px-2.5 py-1 text-[11px] font-extrabold text-gold-200 border border-gold-400/70 shadow-[0_0_14px_rgba(245,158,11,0.55)] hover:scale-105 transition-transform"
+                        >
+                          <span className="relative flex h-2 w-2">
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-gold-400 opacity-80" />
+                            <span className="relative inline-flex h-2 w-2 rounded-full bg-gold-300" />
+                          </span>
+                          <Video className="h-3.5 w-3.5 text-gold-300" />
+                          <span>{language === 'ur' ? 'ویڈیو' : 'Watch Video'}</span>
+                        </button>
+                      )}
+                    </div>
                     <div className="flex items-center gap-1.5">
                       <Badge
                         variant={

@@ -35,6 +35,7 @@ export interface ShareableItem {
   collected_amount_pkr: number;
   donor_count?: number;
   is_completed?: boolean;
+  has_video?: boolean;
 }
 
 interface SocialShareModalProps {
@@ -88,7 +89,7 @@ ${item.summary_en}
 💚 Every rupee goes directly to the verified vendor — never raw cash, always backed by a QR-verifiable receipt.
 🤲 Contribute whatever you can, OR share this message with family & WhatsApp groups — "Whoever guides someone to goodness will have a reward like one who did it."
 
-🔗 Contribute & Track Live: ${shareUrl}`;
+🔗 Contribute & Track Live${item.has_video ? ' (🎥 Watch Verified Ground Video)' : ''}: ${shareUrl}`;
 
   const urduCaption = `🌿 امانت (Amanat) — 100% براہِ راست وینڈر ایسکرو · 0% ایڈمن فیس
 
@@ -104,7 +105,7 @@ ${item.summary_ur}
 💚 آپ کا ہر روپیہ براہِ راست تصدیق شدہ ہسپتال، سکول یا راشن وینڈر کو ادا کیا جاتا ہے اور آپ کو QR رسید ملتی ہے۔
 🤲 اپنی استطاعت کے مطابق تعاون کریں، یا کم از کم اس پیغام کو آگے شیئر کر دیں — نیکی کی رہنمائی کرنے والے کو بھی نیکی کرنے والے کے برابر اجر ملتا ہے۔
 
-🔗 تعاون اور لائیو ٹریکنگ کے لیے لنک: ${shareUrl}`;
+🔗 تعاون اور لائیو ٹریکنگ${item.has_video ? ' (🎥 تصدیق شدہ گراؤنڈ ویڈیو دیکھیں)' : ''} کے لیے لنک: ${shareUrl}`;
 
   const hashtags = `#AmanatPunjab #ZakatTransparency #SadaqahJariyah #${hashtagDistrict} #Pakistan`;
 

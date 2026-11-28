@@ -35,6 +35,7 @@ import { DonorDashboard } from '@/components/DonorDashboard';
 import { VerifierQrScannerModal } from '@/components/VerifierQrScannerModal';
 import { ReceiptVerifyModal } from '@/components/ReceiptVerifyModal';
 import { SocialShareModal, type ShareableItem } from '@/components/SocialShareModal';
+import { VideoStoryModal, type VideoStoryItem } from '@/components/VideoStoryModal';
 import {
   SafeInboxOnboardingModal,
   SAFE_INBOX_KEY_PREFIX,
@@ -82,6 +83,7 @@ export default function App() {
   const [caseFilter, setCaseFilter] = useState<CaseFilterKey>('all');
   const [donationTarget, setDonationTarget] = useState<DonationTarget | null>(null);
   const [shareItem, setShareItem] = useState<ShareableItem | null>(null);
+  const [videoStoryItem, setVideoStoryItem] = useState<VideoStoryItem | null>(null);
   const [highlightedCode, setHighlightedCode] = useState<string | null>(null);
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -408,6 +410,7 @@ export default function App() {
               highlightedCode={highlightedCode}
               onDonate={(target) => setDonationTarget(target)}
               onShare={(item) => setShareItem(item)}
+              onWatchVideo={(item) => setVideoStoryItem(item)}
             />
 
             <CasesSection
@@ -419,6 +422,7 @@ export default function App() {
               onChangeFilter={setCaseFilter}
               onDonate={(target) => setDonationTarget(target)}
               onShare={(item) => setShareItem(item)}
+              onWatchVideo={(item) => setVideoStoryItem(item)}
             />
 
             <EscrowPipeline />
@@ -499,6 +503,14 @@ export default function App() {
             }}
             onUpdateCampaignStatus={async (id, status) => {
               await dataClient.updateCampaignStatus(id, status);
+              await refreshData();
+            }}
+            onUpdateCampaignVideo={async (id, payload) => {
+              await dataClient.updateCampaignVideo(id, payload);
+              await refreshData();
+            }}
+            onUpdateCaseVideo={async (id, payload) => {
+              await dataClient.updateCaseVideo(id, payload);
               await refreshData();
             }}
             onConfirmDonation={async (donationId) => {
@@ -750,6 +762,104 @@ export default function App() {
       />
 
       <SocialShareModal item={shareItem} onClose={() => setShareItem(null)} />
+
+      <VideoStoryModal
+        item={videoStoryItem}
+        language={language}
+        onClose={() => setVideoStoryItem(null)}
+        onDonate={
+          videoStoryItem
+            ? () => {
+                if (videoStoryItem.type === 'campaign') {
+                  const camp = campaigns.find((c) => c.campaign_code === videoStoryItem.code);
+                  if (camp) {
+                    setDonationTarget({
+                      type: 'campaign',
+                      id: camp.id,
+                      code: camp.campaign_code,
+                      title_en: camp.title_en,
+                      title_ur: camp.title_ur,
+                      district: camp.district,
+                      vendor_name: camp.vendor_name,
+                      vendor_invoice_url: camp.vendor_invoice_url,
+                      funding_type: camp.funding_type,
+                      target_amount_pkr: camp.target_amount_pkr,
+                      collected_amount_pkr: camp.collected_amount_pkr,
+                      pledged_amount_pkr: camp.pledged_amount_pkr,
+                      status: camp.status,
+                    });
+                  }
+                } else {
+                  const cs = cases.find((c) => c.case_code === videoStoryItem.code);
+                  if (cs) {
+                    setDonationTarget({
+                      type: 'case',
+                      id: cs.id,
+                      code: cs.case_code,
+                      title_en: `${cs.case_code} — ${cs.district} (${cs.vendor_type})`,
+                      title_ur: `${cs.case_code} — ${cs.district}`,
+                      district: cs.district,
+                      vendor_name: cs.vendor_name,
+                      vendor_invoice_url: cs.vendor_invoice_url,
+                      funding_type: cs.funding_type,
+                      target_amount_pkr: cs.target_amount_pkr,
+                      collected_amount_pkr: cs.raised_amount_pkr,
+                      pledged_amount_pkr: cs.pledged_amount_pkr,
+                      status: cs.status,
+                    });
+                  }
+                }
+              }
+            : undefined
+        }
+        onShare={
+          videoStoryItem
+            ? () => {
+                if (videoStoryItem.type === 'campaign') {
+                  const camp = campaigns.find((c) => c.campaign_code === videoStoryItem.code);
+                  if (camp) {
+                    setShareItem({
+                      type: 'campaign',
+                      code: camp.campaign_code,
+                      title_en: camp.title_en,
+                      title_ur: camp.title_ur,
+                      summary_en: camp.summary_en,
+                      summary_ur: camp.summary_ur,
+                      district: camp.district,
+                      category: camp.category,
+                      funding_type: camp.funding_type,
+                      vendor_name: camp.vendor_name,
+                      target_amount_pkr: camp.target_amount_pkr,
+                      collected_amount_pkr: camp.collected_amount_pkr,
+                      donor_count: camp.donor_count,
+                      has_video: true,
+                    });
+                  }
+                } else {
+                  const cs = cases.find((c) => c.case_code === videoStoryItem.code);
+                  if (cs) {
+                    setShareItem({
+                      type: 'case',
+                      code: cs.case_code,
+                      title_en: `${cs.case_code} — ${cs.district}`,
+                      title_ur: `${cs.district} میں مستحق خاندان کی امداد (${cs.case_code})`,
+                      summary_en: cs.anonymized_story_en,
+                      summary_ur: cs.anonymized_story_ur,
+                      district: cs.district,
+                      tehsil: cs.tehsil,
+                      category: cs.category,
+                      funding_type: cs.funding_type,
+                      vendor_name: cs.vendor_name,
+                      target_amount_pkr: cs.target_amount_pkr,
+                      collected_amount_pkr: cs.raised_amount_pkr,
+                      has_video: true,
+                    });
+                  }
+                }
+              }
+            : undefined
+        }
+      />
 
       {currentUser && (
         <SafeInboxOnboardingModal
