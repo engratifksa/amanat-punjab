@@ -254,6 +254,10 @@ export function VerifierWorkspace({
                   phone: applyPhone.trim(),
                   photo_url: applyPhoto,
                 });
+              } catch (err) {
+                setApplyError(
+                  err instanceof Error ? err.message : 'Could not submit verifier application.'
+                );
               } finally {
                 setApplying(false);
               }

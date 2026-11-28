@@ -1027,18 +1027,23 @@ export const dataClient = {
     await ensureLocalSeeded();
     const cleanEmail = input.email.trim().toLowerCase();
     const cleanName = input.full_name.trim() || cleanEmail.split('@')[0] || 'Amanat User';
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const validAuthUuid =
+      input.auth_user_id && UUID_RE.test(input.auth_user_id) ? input.auth_user_id : null;
+    const activeSettings = await getActiveSettings();
+    const isDemoMode = activeSettings.app_mode === 'training';
     const uploadedPhoto = input.photo_url
       ? await uploadMediaToStorage(input.photo_url, 'verifier-photos')
       : null;
 
     if (supabase) {
-      // 1. Lookup by auth_user_id first, then email, then full_name
+      // 1. Lookup by valid UUID auth_user_id first, then email, then full_name
       let existing: Profile | null = null;
-      if (input.auth_user_id) {
+      if (validAuthUuid) {
         const { data } = await supabase
           .from('profiles')
           .select('*')
-          .eq('auth_user_id', input.auth_user_id)
+          .eq('auth_user_id', validAuthUuid)
           .maybeSingle();
         if (data) existing = data as Profile;
       }
@@ -1062,7 +1067,7 @@ export const dataClient = {
       if (existing) {
         const patch: Partial<Profile> = {
           email: existing.email || cleanEmail,
-          auth_user_id: existing.auth_user_id || input.auth_user_id || null,
+          auth_user_id: existing.auth_user_id || validAuthUuid || null,
         };
         if (input.applyAsVerifier) {
           patch.role = 'verifier';
@@ -1076,18 +1081,19 @@ export const dataClient = {
             patch.verifier_badge_title = `Pending Admin Approval — ${input.district || existing.district}`;
           }
         }
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('profiles')
           .update(patch)
           .eq('id', existing.id)
           .select()
           .single();
+        if (error) throw error;
         return (data as Profile) ?? { ...existing, ...patch };
       }
 
       const newProf: Profile = {
         id: generateId(input.applyAsVerifier ? 'prof-ver' : 'prof-usr'),
-        auth_user_id: input.auth_user_id || null,
+        auth_user_id: validAuthUuid,
         email: cleanEmail,
         full_name: cleanName,
         phone: input.phone || cleanEmail,
@@ -1103,6 +1109,7 @@ export const dataClient = {
           ? `Pending Admin Approval — ${input.district || 'Lahore'}`
           : null,
         verifier_qr_secret: null,
+        is_demo: isDemoMode && !validAuthUuid,
       };
       const { data, error } = await supabase.from('profiles').insert(newProf).select().single();
       if (error) throw error;
