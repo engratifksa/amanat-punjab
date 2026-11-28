@@ -23,7 +23,7 @@ import type {
   WelfareCase,
 } from '@/types/amanat';
 import { PUNJAB_DISTRICTS } from '@/lib/seedData';
-import { formatPKR, cn, maskCnic } from '@/lib/utils';
+import { formatPKR, cn, maskCnic, normalizeCnicDigits } from '@/lib/utils';
 import { Badge, Button, Card, Input, Select, Textarea } from './ui/primitives';
 import { DualProgressBar } from './DualProgressBar';
 import { LocationPinPicker, type GeoCoordinates } from './LocationPinPicker';
@@ -105,10 +105,31 @@ export function BeneficiaryWorkspace({
   const [recipientTelegramId, setRecipientTelegramId] = useState('');
   const [showTelegramGuide, setShowTelegramGuide] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [justCreated, setJustCreated] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [justCreated, setJustCreated] = useState<{
+    code: string;
+    priorCount: number;
+    priorCodes: string | null;
+  } | null>(null);
   const [myCaseFilter, setMyCaseFilter] = useState<
     'all' | 'zakat_eligible' | CaseCategory
   >('all');
+
+  // Instant real-time CNIC governance check as soon as 13 digits are entered
+  const enteredCnicDigits = normalizeCnicDigits(cnic);
+  const cnicMatches =
+    enteredCnicDigits.length === 13
+      ? cases.filter((c) => normalizeCnicDigits(c.beneficiary_cnic) === enteredCnicDigits)
+      : [];
+  const activeCnicCase =
+    cnicMatches.find((c) =>
+      ['pending_admin_review', 'pending_field_visit', 'field_verified', 'approved', 'funded'].includes(
+        c.status
+      )
+    ) ?? null;
+  const priorCompletedCnicCases = cnicMatches.filter(
+    (c) => c.status === 'disbursed_to_vendor' || c.status === 'rejected'
+  );
 
   // Any signed-in Google/Email user has instant access (never asks to sign in again!)
   const isBeneficiarySignedIn = Boolean(currentUser);
@@ -138,6 +159,13 @@ export function BeneficiaryWorkspace({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!vendorName.trim() || !storyEn.trim() || !fullName.trim() || !phone.trim()) return;
+    if (activeCnicCase) {
+      setSubmitError(
+        `An active request (${activeCnicCase.case_code}) is already open for this CNIC. Only one active request per CNIC is allowed at a time.`
+      );
+      return;
+    }
+    setSubmitError(null);
     setSubmitting(true);
     try {
       const created = await onSubmitCase({
@@ -161,11 +189,19 @@ export function BeneficiaryWorkspace({
         beneficiary_address_note: locationText || `${district} / ${tehsil}`,
         beneficiary_account_email: currentUser?.email ?? recipientEmail.trim(),
       });
-      setJustCreated(created.case_code);
+      setJustCreated({
+        code: created.case_code,
+        priorCount: created.prior_application_count ?? 0,
+        priorCodes: created.prior_case_codes ?? null,
+      });
       setVendorName('');
       setStoryEn('');
       setStoryUr('');
       setInvoicePhoto(null);
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error ? err.message : 'Unable to submit request. Please try again.'
+      );
     } finally {
       setSubmitting(false);
     }
@@ -235,10 +271,18 @@ export function BeneficiaryWorkspace({
               <div className="flex items-center gap-3">
                 <CheckCircle2 className="h-5 w-5 text-emerald-700 shrink-0" />
                 <span>
-                  Confidential request logged as <strong>{justCreated}</strong> and routed to the
-                  Verification Board for area Field Verifier assignment.
+                  Confidential request logged as <strong>{justCreated.code}</strong> and routed to
+                  the Verification Board for area Field Verifier assignment.
                 </span>
               </div>
+              {justCreated.priorCount > 0 && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950 leading-relaxed">
+                  <strong>Repeat Application Notice (Application #{justCreated.priorCount + 1}):</strong>{' '}
+                  Our records show prior request(s) under this CNIC ({justCreated.priorCodes}). Your
+                  new application has been submitted and our Verification Board is carefully
+                  reviewing it alongside other deserving families.
+                </div>
+              )}
               <p className="text-[11px] font-medium text-emerald-800 bg-white/80 rounded-xl px-3 py-2 border border-emerald-200/70">
                 <strong>Inbox Tip (ای میل ہدایت):</strong> Check your Inbox (or Spam folder once)
                 for <span className="font-mono font-bold">support.amanat@gmail.com</span> and tap{' '}
@@ -489,14 +533,51 @@ export function BeneficiaryWorkspace({
               </div>
             </div>
 
+            {activeCnicCase && (
+              <div className="rounded-2xl border border-rose-300 bg-rose-50 p-3.5 text-xs font-bold text-rose-900 space-y-1">
+                <p>
+                  Active Request Already Open ({activeCnicCase.case_code} —{' '}
+                  {activeCnicCase.status.replace(/_/g, ' ').toUpperCase()})
+                </p>
+                <p className="font-medium text-rose-800 leading-relaxed">
+                  Only one active request per CNIC is permitted at a time so our limited resources
+                  can serve other deserving families fairly. You may apply again once your current
+                  case is completed.
+                </p>
+                <p dir="rtl" className="font-medium text-rose-800">
+                  اس شناختی کارڈ پر پہلے سے ایک درخواست ({activeCnicCase.case_code}) زیرِ کار ہے۔
+                  موجودہ کیس مکمل ہونے کے بعد ہی نئی درخواست دی جا سکتی ہے۔
+                </p>
+              </div>
+            )}
+
+            {!activeCnicCase && priorCompletedCnicCases.length > 0 && (
+              <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+                <strong>Repeat Applicant Notice:</strong> This will be{' '}
+                <strong>Application #{priorCompletedCnicCases.length + 1}</strong> under this CNIC
+                (prior cases: {priorCompletedCnicCases.map((x) => x.case_code).join(', ')}). You may
+                submit, and the Verification Board will be notified to review fairly.
+              </div>
+            )}
+
+            {submitError && (
+              <div className="rounded-2xl border border-rose-300 bg-rose-50 p-3.5 text-xs font-bold text-rose-900">
+                {submitError}
+              </div>
+            )}
+
             <Button
               type="submit"
               variant="primary"
               size="lg"
               className="w-full"
-              disabled={submitting}
+              disabled={submitting || Boolean(activeCnicCase)}
             >
-              {submitting ? 'Submitting...' : t('beneficiary.submit')}
+              {submitting
+                ? 'Submitting...'
+                : activeCnicCase
+                ? 'Active Request Already Open for This CNIC'
+                : t('beneficiary.submit')}
             </Button>
           </form>
         </Card>

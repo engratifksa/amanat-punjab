@@ -39,7 +39,7 @@ import {
   type BuildMilestoneNotificationArgs,
 } from './notifications';
 import { generateQrSecretHex } from './dynamicQr';
-import { maskCnic } from './utils';
+import { maskCnic, normalizeCnicDigits, normalizeTxRef, sha256Hex } from './utils';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -748,6 +748,59 @@ export const dataClient = {
 
   async submitBeneficiaryCase(input: CreateCaseInput): Promise<WelfareCase> {
     await ensureLocalSeeded();
+    const activeSettings = await getActiveSettings();
+    const isDemoMode = activeSettings.app_mode === 'training';
+
+    // Smart CNIC Governance: 1 active request per CNIC + Repeat-Applicant tracking
+    const cnicDigits = normalizeCnicDigits(input.beneficiary_cnic);
+    let priorApplicationCount = 0;
+    let priorServedPkr = 0;
+    let priorCaseCodes: string | null = null;
+    let daysSinceLastServed: number | null = null;
+
+    if (cnicDigits.length === 13) {
+      const allModeCases: WelfareCase[] = supabase
+        ? (((await supabase.from('cases').select('*').eq('is_demo', isDemoMode)).data ??
+            []) as WelfareCase[])
+        : (await localDb.cases.toArray()).filter((c) => Boolean(c.is_demo) === isDemoMode);
+
+      const sameCnicCases = allModeCases.filter(
+        (c) => normalizeCnicDigits(c.beneficiary_cnic) === cnicDigits
+      );
+
+      const ACTIVE_STATUSES = new Set([
+        'pending_admin_review',
+        'pending_field_visit',
+        'field_verified',
+        'approved',
+        'funded',
+      ]);
+      const activeExisting = sameCnicCases.find((c) => ACTIVE_STATUSES.has(c.status));
+      if (activeExisting) {
+        const statusLabel = activeExisting.status.replace(/_/g, ' ').toUpperCase();
+        throw new Error(
+          `Active Request Already Open (${activeExisting.case_code} — ${statusLabel}): Only one active request per CNIC is allowed at a time so our limited resources can fairly serve other deserving families. You may apply again once your current case is completed. | اس شناختی کارڈ پر پہلے سے ایک درخواست (${activeExisting.case_code}) زیرِ کار ہے۔`
+        );
+      }
+
+      if (sameCnicCases.length > 0) {
+        priorApplicationCount = sameCnicCases.length;
+        priorServedPkr = sameCnicCases
+          .filter((c) => c.status === 'disbursed_to_vendor')
+          .reduce((sum, c) => sum + (c.raised_amount_pkr || c.target_amount_pkr), 0);
+        priorCaseCodes = sameCnicCases.map((c) => c.case_code).join(', ');
+        const latestPrior = sameCnicCases.sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )[0];
+        if (latestPrior) {
+          daysSinceLastServed = Math.max(
+            0,
+            Math.floor((Date.now() - new Date(latestPrior.created_at).getTime()) / 86_400_000)
+          );
+        }
+      }
+    }
+
     const uploadedInvoice = await uploadMediaToStorage(input.vendor_invoice_url, 'invoices');
     const count = supabase
       ? (await supabase.from('cases').select('id', { count: 'exact', head: true })).count ?? 8
@@ -763,9 +816,6 @@ export const dataClient = {
             input.target_amount_pkr,
             `INV-${caseCode}`
           );
-
-    const activeSettings = await getActiveSettings();
-    const isDemoMode = activeSettings.app_mode === 'training';
 
     const newCase: WelfareCase = {
       id: generateId('case'),
@@ -794,43 +844,82 @@ export const dataClient = {
       beneficiary_lng: input.beneficiary_lng ?? null,
       beneficiary_address_note: input.beneficiary_address_note?.trim(),
       beneficiary_account_email: input.beneficiary_account_email?.trim(),
+      prior_application_count: priorApplicationCount,
+      prior_served_pkr: priorServedPkr,
+      prior_case_codes: priorCaseCodes,
       is_demo: isDemoMode,
     };
 
+    let createdCase: WelfareCase = newCase;
     if (supabase) {
       const { data, error } = await supabase.from('cases').insert(newCase).select().single();
       if (error) throw error;
-      return data as WelfareCase;
+      createdCase = data as WelfareCase;
+    } else {
+      await localDb.cases.put(newCase);
     }
 
-    await localDb.cases.put(newCase);
     await saveSubscription({
       role: 'beneficiary',
-      case_id: newCase.id,
+      case_id: createdCase.id,
       campaign_id: null,
       email: input.recipient_email ?? null,
       telegram_chat_id: input.recipient_telegram_id ?? null,
     });
+
+    const nthLabel =
+      priorApplicationCount > 0 ? ` (Application #${priorApplicationCount + 1})` : '';
     await emitNotification(
       {
         event_type: 'case_submitted',
         audience: 'beneficiary',
-        target_code: newCase.case_code,
-        case_id: newCase.id,
+        target_code: createdCase.case_code,
+        case_id: createdCase.id,
         campaign_id: null,
-        title_en: `Confidential Request Logged (${newCase.case_code})`,
-        title_ur: `خفیہ درخواست درج ہو گئی (${newCase.case_code})`,
-        body_en: `Your request for PKR ${newCase.target_amount_pkr.toLocaleString('en-PK')} via ${newCase.vendor_name} has been assigned to an Accredited Field Verifier in ${newCase.district}.`,
-        body_ur: `آپ کی درخواست (${newCase.case_code}) فیلڈ ویریفیکیشن کے لیے ضلع ${newCase.district} کے مستند ویریفائر کو تفویض کر دی گئی ہے۔`,
-        vendor_name: newCase.vendor_name,
-        district: newCase.district,
+        title_en: `Confidential Request Logged (${createdCase.case_code})${nthLabel}`,
+        title_ur: `خفیہ درخواست درج ہو گئی (${createdCase.case_code})`,
+        body_en:
+          priorApplicationCount > 0
+            ? `Your request (${createdCase.case_code}) for PKR ${createdCase.target_amount_pkr.toLocaleString('en-PK')} via ${createdCase.vendor_name} has been logged. Note: This is your #${priorApplicationCount + 1} application on Amanat (prior cases: ${priorCaseCodes}). Our Verification Board reviews repeat applications carefully to ensure fair distribution.`
+            : `Your request for PKR ${createdCase.target_amount_pkr.toLocaleString('en-PK')} via ${createdCase.vendor_name} has been routed to the Verification Board in ${createdCase.district}.`,
+        body_ur:
+          priorApplicationCount > 0
+            ? `آپ کی درخواست (${createdCase.case_code}) درج ہو گئی ہے۔ نوٹ: یہ امانت پر آپ کی ${priorApplicationCount + 1} ویں درخواست ہے؛ ویریفیکیشن بورڈ منصفانہ تقسیم کے لیے اس کا خصوصی جائزہ لے گا۔`
+            : `آپ کی درخواست (${createdCase.case_code}) فیلڈ ویریفیکیشن کے لیے ضلع ${createdCase.district} کے بورڈ کو ارسال کر دی گئی ہے۔`,
+        vendor_name: createdCase.vendor_name,
+        district: createdCase.district,
         collected_pkr: 0,
-        target_pkr: newCase.target_amount_pkr,
+        target_pkr: createdCase.target_amount_pkr,
       },
       input.recipient_email ? [input.recipient_email] : [],
       input.recipient_telegram_id ? [input.recipient_telegram_id] : []
     );
-    return newCase;
+
+    // Notify Admin Board specifically when a previously served/applied CNIC submits a repeat request
+    if (priorApplicationCount > 0) {
+      const adminTg = activeSettings.telegram_config.chatId?.trim()
+        ? [activeSettings.telegram_config.chatId.trim()]
+        : [];
+      await emitNotification(
+        {
+          event_type: 'case_submitted',
+          audience: 'both',
+          target_code: createdCase.case_code,
+          case_id: createdCase.id,
+          campaign_id: null,
+          title_en: `REPEAT APPLICANT ALERT: ${createdCase.case_code} (Application #${priorApplicationCount + 1})`,
+          title_ur: `دوبارہ درخواست کا الرٹ: ${createdCase.case_code}`,
+          body_en: `CNIC ${maskCnic(input.beneficiary_cnic)} (${input.beneficiary_name || 'Applicant'}) has applied before. Prior Cases: ${priorCaseCodes} · Previously Disbursed: PKR ${priorServedPkr.toLocaleString('en-PK')}${daysSinceLastServed !== null ? ` · Last applied ${daysSinceLastServed} day(s) ago` : ''}. Please review carefully in Admin Board.`,
+          body_ur: `شناختی کارڈ ${maskCnic(input.beneficiary_cnic)} پہلے بھی درخواست دے چکا ہے (سابقہ کیس: ${priorCaseCodes}، سابقہ امداد: ${priorServedPkr.toLocaleString('en-PK')} روپے)۔ ایڈمن بورڈ میں جائزہ لیں۔`,
+          vendor_name: createdCase.vendor_name,
+          district: createdCase.district,
+        },
+        [],
+        adminTg
+      );
+    }
+
+    return createdCase;
   },
 
   async assignVerifierToCase(caseId: string, verifierId: string): Promise<void> {
@@ -1882,6 +1971,44 @@ export const dataClient = {
     await ensureLocalSeeded();
     const activeSettings = await getActiveSettings();
     const isDemoMode = activeSettings.app_mode === 'training';
+
+    // 3-Layer Donor Anti-Duplicate Shield (Normalized Tx Ref + Receipt Image SHA-256 Fingerprint)
+    const normRef = normalizeTxRef(input.transaction_ref);
+    const proofHash = input.payment_proof_url ? await sha256Hex(input.payment_proof_url) : null;
+
+    const existingDonations: Donation[] = supabase
+      ? (((await supabase.from('donations').select('*').eq('is_demo', isDemoMode)).data ??
+          []) as Donation[])
+      : (await localDb.donations.toArray()).filter((d) => Boolean(d.is_demo) === isDemoMode);
+
+    const activeNonRejected = existingDonations.filter((d) => d.status !== 'rejected');
+
+    if (normRef) {
+      const dupRef = activeNonRejected.find(
+        (d) =>
+          (d.normalized_tx_ref && d.normalized_tx_ref === normRef) ||
+          normalizeTxRef(d.transaction_ref) === normRef
+      );
+      if (dupRef) {
+        const when = new Date(dupRef.created_at).toLocaleDateString('en-GB');
+        const st = dupRef.status.replace(/_/g, ' ').toUpperCase();
+        throw new Error(
+          `Duplicate Transaction Reference: "${input.transaction_ref.trim()}" was already submitted on ${when} for PKR ${dupRef.amount_pkr.toLocaleString('en-PK')} (Status: ${st}). You can download your existing QR Certificate from your Donor Dashboard instead of submitting again. | یہ ٹرانزیکشن ریفرنس پہلے ہی درج ہو چکا ہے۔`
+        );
+      }
+    }
+
+    if (proofHash) {
+      const dupReceipt = activeNonRejected.find(
+        (d) => d.payment_proof_hash && d.payment_proof_hash === proofHash
+      );
+      if (dupReceipt) {
+        throw new Error(
+          `Duplicate Payment Receipt Detected: This exact receipt image was already uploaded with Transaction Ref "${dupReceipt.transaction_ref}" (PKR ${dupReceipt.amount_pkr.toLocaleString('en-PK')}). Please upload a new transfer receipt. | یہ رسید پہلے ہی اپ لوڈ کی جا چکی ہے۔`
+        );
+      }
+    }
+
     const uploadedProof = await uploadMediaToStorage(input.payment_proof_url, 'payment-proofs');
     const donation: Donation = {
       id: generateId('don'),
@@ -1893,6 +2020,8 @@ export const dataClient = {
       payment_channel: input.payment_channel,
       transaction_ref: input.transaction_ref.trim(),
       payment_proof_url: uploadedProof,
+      payment_proof_hash: proofHash,
+      normalized_tx_ref: normRef,
       status: 'pledged_pending_verify',
       receipt_qr_hash: generateReceiptHash(input.target_code),
       created_at: new Date().toISOString(),

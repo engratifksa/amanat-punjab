@@ -30,6 +30,24 @@ export function formatCnicInput(raw: string): string {
   return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12)}`;
 }
 
+export function normalizeCnicDigits(cnic?: string | null): string {
+  if (!cnic) return '';
+  return cnic.replace(/\D/g, '');
+}
+
+export function normalizeTxRef(ref?: string | null): string {
+  if (!ref) return '';
+  return ref.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
+
+export async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }

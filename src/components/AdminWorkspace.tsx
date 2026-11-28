@@ -1007,9 +1007,18 @@ export function AdminWorkspace({
                       className="rounded-2xl border border-amber-200 bg-amber-50/50 p-4 space-y-2.5 text-xs"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-mono font-extrabold text-emerald-900">
-                          {c.case_code} · {c.district} / {c.tehsil} ({formatPKR(c.target_amount_pkr)})
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono font-extrabold text-emerald-900">
+                            {c.case_code} · {c.district} / {c.tehsil} ({formatPKR(c.target_amount_pkr)})
+                          </span>
+                          {(c.prior_application_count ?? 0) > 0 && (
+                            <Badge variant="rose">
+                              REPEAT APPLICANT · #{(c.prior_application_count ?? 0) + 1} (Prior:{' '}
+                              {c.prior_case_codes || 'Yes'} · Served{' '}
+                              {formatPKR(c.prior_served_pkr ?? 0)})
+                            </Badge>
+                          )}
+                        </div>
                         <Badge variant={localMatches.length > 0 ? 'emerald' : 'rose'}>
                           {localMatches.length > 0
                             ? `${localMatches.length} Accredited Verifier in ${c.district}`
@@ -1220,6 +1229,12 @@ export function AdminWorkspace({
                                 ? 'REJECTED (HIDDEN)'
                                 : 'HIDDEN (IN REVIEW)'}
                             </span>
+                            {(c.prior_application_count ?? 0) > 0 && (
+                              <span className="rounded-full px-2 py-0.5 text-[10px] font-extrabold bg-amber-100 text-amber-950 border border-amber-300">
+                                REPEAT #{(c.prior_application_count ?? 0) + 1} · Served{' '}
+                                {formatPKR(c.prior_served_pkr ?? 0)}
+                              </span>
+                            )}
                           </div>
                           <p className="truncate text-slate-600 mt-0.5">
                             {c.district} · {c.vendor_name} ({formatPKR(c.target_amount_pkr)})

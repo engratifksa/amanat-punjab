@@ -78,6 +78,7 @@ export function PaymentModal({
   const [proofUrl, setProofUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [completedDonation, setCompletedDonation] = useState<Donation | null>(
     existingDonation
   );
@@ -105,6 +106,7 @@ export function PaymentModal({
     e.preventDefault();
     const numericAmount = Number(amount);
     if (!numericAmount || numericAmount <= 0 || !txRef.trim()) return;
+    setSubmitError(null);
     setSubmitting(true);
     try {
       const created = await onSubmitPledge({
@@ -125,6 +127,12 @@ export function PaymentModal({
         origin: { y: 0.6 },
         colors: ['#064E3B', '#10B981', '#F59E0B', '#FDE68A'],
       });
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error
+          ? err.message
+          : 'Could not record contribution. Please check your transaction reference and try again.'
+      );
     } finally {
       setSubmitting(false);
     }
@@ -351,9 +359,18 @@ export function PaymentModal({
                 <SmartImageCapture
                   label={t('payment.proofLabel')}
                   value={proofUrl}
-                  onChange={setProofUrl}
-                  helperText="Take a photo of your transfer receipt or upload from gallery (auto-compressed & croppable)"
+                  onChange={(val) => {
+                    setProofUrl(val);
+                    setSubmitError(null);
+                  }}
+                  helperText="Take a photo of your transfer receipt or upload from gallery (auto-compressed, croppable & SHA-256 duplicate-checked)"
                 />
+
+                {submitError && (
+                  <div className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-900 leading-relaxed">
+                    {submitError}
+                  </div>
+                )}
 
                 <Button
                   type="submit"

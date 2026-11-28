@@ -120,6 +120,9 @@ export interface WelfareCase {
   beneficiary_account_email?: string;
   rejection_reason?: string | null;
   visit_handshake_pin?: string | null;
+  prior_application_count?: number;
+  prior_served_pkr?: number;
+  prior_case_codes?: string | null;
   is_demo?: boolean;
 }
 
@@ -156,6 +159,8 @@ export interface Donation {
   created_at: string;
   donor_note?: string;
   rejection_reason?: string | null;
+  payment_proof_hash?: string | null;
+  normalized_tx_ref?: string | null;
   is_demo?: boolean;
 }
 
