@@ -30,13 +30,19 @@ export interface OtpDispatchResult {
 export async function sendTelegramOtp(
   otp: string,
   config: TelegramSecurityConfig,
-  customMessage?: string
+  customMessage?: string,
+  forceLiveTelegram = false
 ): Promise<OtpDispatchResult> {
   const expiresAt = Date.now() + 5 * 60 * 1000;
   const botToken = config.botToken.trim();
   const chatId = config.chatId.trim();
 
-  if (botToken && chatId) {
+  // Only dispatch live Telegram OTP for Gate 2 when the toggle is explicitly enabled
+  // (or when Admin clicks "Send Test OTP" with forceLiveTelegram = true).
+  const shouldUseLiveTelegram =
+    Boolean(botToken && chatId) && (forceLiveTelegram || Boolean(config.requireRealTelegramOtp));
+
+  if (shouldUseLiveTelegram) {
     try {
       const text =
         customMessage ??

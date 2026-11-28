@@ -47,7 +47,9 @@ export function AdminAuthModal({
 
   const isLockedOut = Date.now() < lockedUntil;
   const telegramConfigured = Boolean(
-    settings.telegram_config.botToken.trim() && settings.telegram_config.chatId.trim()
+    settings.telegram_config.requireRealTelegramOtp &&
+      settings.telegram_config.botToken.trim() &&
+      settings.telegram_config.chatId.trim()
   );
 
   const resetAndClose = () => {

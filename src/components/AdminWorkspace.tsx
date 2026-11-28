@@ -22,6 +22,9 @@ import {
   Download,
   Trash2,
   AlertTriangle,
+  Lock,
+  Pencil,
+  X,
 } from 'lucide-react';
 import { VolunteerPostModal } from './VolunteerPostModal';
 import { TelegramGuideModal } from './TelegramGuideModal';
@@ -144,6 +147,62 @@ export function AdminWorkspace({
   const [newPassword, setNewPassword] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   const [testingTelegram, setTestingTelegram] = useState(false);
+  const [unlockedSections, setUnlockedSections] = useState<{
+    social: boolean;
+    telegram: boolean;
+    escrow: boolean;
+    gateway: boolean;
+    password: boolean;
+  }>({
+    social: false,
+    telegram: false,
+    escrow: false,
+    gateway: false,
+    password: false,
+  });
+
+  const anySectionUnlocked = Object.values(unlockedSections).some(Boolean);
+
+  const unlockSection = (key: keyof typeof unlockedSections) => {
+    setUnlockedSections((prev) => ({ ...prev, [key]: true }));
+  };
+
+  const cancelSection = (key: keyof typeof unlockedSections) => {
+    setDraftSettings((prev) => {
+      if (key === 'social') return { ...prev, social_links: settings.social_links };
+      if (key === 'telegram') return { ...prev, telegram_config: settings.telegram_config };
+      if (key === 'escrow') return { ...prev, escrow_accounts: settings.escrow_accounts };
+      if (key === 'gateway') return { ...prev, email_gateway: settings.email_gateway };
+      return prev;
+    });
+    if (key === 'password') setNewPassword('');
+    setUnlockedSections((prev) => ({ ...prev, [key]: false }));
+  };
+
+  const saveSection = async (key: keyof typeof unlockedSections) => {
+    if (key === 'escrow') {
+      const ok = window.confirm(
+        'Confirm updating live Direct Escrow Payment Accounts (Raast, JazzCash, EasyPaisa, IBAN, SWIFT)? These numbers will immediately appear to donors.'
+      );
+      if (!ok) return;
+    }
+    setSavingSettings(true);
+    try {
+      let nextHash = draftSettings.admin_password_hash;
+      if (key === 'password' && newPassword.trim().length >= 6) {
+        nextHash = await hashAdminPassword(newPassword.trim());
+      }
+      await onSaveSettings({
+        ...draftSettings,
+        admin_password_hash: nextHash,
+      });
+      if (key === 'password') setNewPassword('');
+      setUnlockedSections((prev) => ({ ...prev, [key]: false }));
+      setNotice('Saved changes to Supabase and re-locked section for safety.');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
   const [volunteerPostCase, setVolunteerPostCase] = useState<WelfareCase | null>(null);
   const [showTelegramGuide, setShowTelegramGuide] = useState(false);
   const [flushConfirmText, setFlushConfirmText] = useState('');
@@ -204,8 +263,15 @@ export function AdminWorkspace({
         admin_password_hash: nextHash,
       });
       setNewPassword('');
+      setUnlockedSections({
+        social: false,
+        telegram: false,
+        escrow: false,
+        gateway: false,
+        password: false,
+      });
       setNotice(
-        'Saved Social Media Links, Escrow Payment Accounts & Telegram 2FA Settings! Changes are now live across the app.'
+        'Saved Social Media Links, Escrow Payment Accounts & Telegram 2FA Settings! All sections re-locked.'
       );
     } finally {
       setSavingSettings(false);
@@ -219,7 +285,8 @@ export function AdminWorkspace({
       const res = await sendTelegramOtp(
         sampleCode,
         draftSettings.telegram_config,
-        `✅ *Amanat Telegram 2FA Test*\n\nConnection verified! Sample OTP: \`${sampleCode}\``
+        `✅ *Amanat Telegram 2FA Test*\n\nConnection verified! Sample OTP: \`${sampleCode}\``,
+        true
       );
       if (res.sentVia === 'telegram' && !res.error) {
         setNotice('Test Telegram OTP sent successfully! Check your Telegram chat.');
@@ -1056,18 +1123,76 @@ export function AdminWorkspace({
       ) : (
         /* Dedicated Settings, Social Media, Escrow Accounts & Telegram 2FA Tab */
         <form onSubmit={handleSaveAllSettings} className="space-y-6">
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-xs text-emerald-950 flex items-center gap-2.5">
+            <Lock className="h-4 w-4 text-emerald-700 shrink-0" />
+            <span>
+              <strong>Accidental-Edit Protection Active:</strong> All links, accounts, and 2FA
+              fields are locked read-only by default. Tap <strong>Edit</strong> on any section to
+              modify, then <strong>Save</strong> or <strong>Cancel</strong>.
+            </span>
+          </div>
+
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             {/* 1. Social Media & Direct Contact Bar + Telegram 2FA Setup */}
-            <Card className="p-6 space-y-4">
-              <h2 className="text-base font-extrabold text-emerald-950 flex items-center gap-2">
-                <Globe className="h-5 w-5 text-emerald-700" />
-                Social Media, Contact Channels &amp; Telegram 2FA
-              </h2>
-              <p className="text-xs text-slate-500">
-                Leave any field blank to hide that icon from the public social bar.
-              </p>
+            <Card
+              className={cn(
+                'p-6 space-y-5 transition-all',
+                (unlockedSections.social || unlockedSections.telegram) &&
+                  'ring-2 ring-gold-400 border-gold-400'
+              )}
+            >
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-base font-extrabold text-emerald-950 flex items-center gap-2">
+                    <Globe className="h-5 w-5 text-emerald-700" />
+                    Social Media &amp; Contact Links
+                  </h2>
+                  {unlockedSections.social ? (
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        disabled={savingSettings}
+                        onClick={() => saveSection('social')}
+                      >
+                        <Save className="h-3.5 w-3.5" />
+                        Save
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => cancelSection('social')}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => unlockSection('social')}
+                    >
+                      <Lock className="h-3.5 w-3.5 text-slate-500" />
+                      <Pencil className="h-3.5 w-3.5 text-emerald-700" />
+                      Edit Links
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500">
+                  Leave any field blank to hide that icon from the public social bar.
+                </p>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <fieldset
+                  disabled={!unlockedSections.social}
+                  className={cn(
+                    'grid grid-cols-1 gap-3 sm:grid-cols-2 transition-opacity',
+                    !unlockedSections.social && 'opacity-75 [&_input]:bg-slate-100 [&_input]:text-slate-600 [&_input]:cursor-not-allowed'
+                  )}
+                >
                 <div>
                   <label className="mb-1 block text-xs font-bold text-slate-700">TikTok URL</label>
                   <Input
@@ -1172,16 +1297,17 @@ export function AdminWorkspace({
                     placeholder="https://t.me/amanatpunjab"
                   />
                 </div>
+                </fieldset>
               </div>
 
               {/* Telegram 2FA OTP Setup */}
               <div className="pt-4 border-t border-slate-200 space-y-3">
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-extrabold text-emerald-950 flex items-center gap-1.5">
                     <Send className="h-4 w-4 text-sky-600" />
                     Telegram 2FA OTP Bot Setup (Gate 2)
                   </h3>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-1.5">
                     <Button
                       type="button"
                       variant="outline"
@@ -1200,9 +1326,50 @@ export function AdminWorkspace({
                       <Send className="h-3.5 w-3.5" />
                       {testingTelegram ? 'Sending...' : 'Send Test OTP'}
                     </Button>
+                    {unlockedSections.telegram ? (
+                      <>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          disabled={savingSettings}
+                          onClick={() => saveSection('telegram')}
+                        >
+                          <Save className="h-3.5 w-3.5" />
+                          Save
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => cancelSection('telegram')}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          Cancel
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => unlockSection('telegram')}
+                      >
+                        <Lock className="h-3.5 w-3.5 text-slate-500" />
+                        <Pencil className="h-3.5 w-3.5 text-emerald-700" />
+                        Edit 2FA
+                      </Button>
+                    )}
                   </div>
                 </div>
 
+                <fieldset
+                  disabled={!unlockedSections.telegram}
+                  className={cn(
+                    'space-y-3 transition-opacity',
+                    !unlockedSections.telegram && 'opacity-75 [&_input]:bg-slate-100 [&_input]:text-slate-600 [&_input]:cursor-not-allowed'
+                  )}
+                >
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-xs font-bold text-slate-700">
@@ -1258,23 +1425,75 @@ export function AdminWorkspace({
                     }
                     className="h-4 w-4 rounded border-slate-300 text-emerald-700"
                   />
-                  Strictly require live Telegram OTP delivery (disable local fallback)
+                  Enable Live Telegram 2FA OTP (uncheck to fall back safely to Local Setup OTP)
                 </label>
+                </fieldset>
               </div>
             </Card>
 
             {/* 2. Escrow Payment Accounts + Admin Password */}
-            <Card className="p-6 space-y-4">
-              <h2 className="text-base font-extrabold text-emerald-950 flex items-center gap-2">
-                <Landmark className="h-5 w-5 text-gold-600" />
-                Direct Escrow Payment Accounts (Live in Donor Modal)
-              </h2>
-              <p className="text-xs text-slate-500">
-                Updates Raast, JazzCash, EasyPaisa, Meezan Bank, and Overseas SWIFT everywhere
-                instantly.
-              </p>
-
+            <Card
+              className={cn(
+                'p-6 space-y-5 transition-all',
+                (unlockedSections.escrow ||
+                  unlockedSections.gateway ||
+                  unlockedSections.password) &&
+                  'ring-2 ring-gold-400 border-gold-400'
+              )}
+            >
               <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-base font-extrabold text-emerald-950 flex items-center gap-2">
+                    <Landmark className="h-5 w-5 text-gold-600" />
+                    Direct Escrow Payment Accounts
+                  </h2>
+                  {unlockedSections.escrow ? (
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        disabled={savingSettings}
+                        onClick={() => saveSection('escrow')}
+                      >
+                        <Save className="h-3.5 w-3.5" />
+                        Save
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => cancelSection('escrow')}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => unlockSection('escrow')}
+                    >
+                      <Lock className="h-3.5 w-3.5 text-slate-500" />
+                      <Pencil className="h-3.5 w-3.5 text-emerald-700" />
+                      Edit Accounts
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500">
+                  Updates Raast, JazzCash, EasyPaisa, Meezan Bank, and Overseas SWIFT everywhere
+                  instantly.
+                </p>
+
+                <fieldset
+                  disabled={!unlockedSections.escrow}
+                  className={cn(
+                    'space-y-3 transition-opacity',
+                    !unlockedSections.escrow && 'opacity-75 [&_input]:bg-slate-100 [&_input]:text-slate-600 [&_input]:cursor-not-allowed'
+                  )}
+                >
                 {(
                   [
                     ['raast', 'Raast Instant ID'],
@@ -1326,30 +1545,73 @@ export function AdminWorkspace({
                     </div>
                   </div>
                 ))}
+                </fieldset>
               </div>
 
               {/* Gmail Notification Gateway (support.amanat@gmail.com) + Test Broadcast */}
               <div className="pt-4 border-t border-slate-200 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-extrabold text-emerald-950">
-                    Gmail Notification Gateway (Major Milestones: 25% · 50% · 75% · 100%)
+                    Gmail Notification Gateway (25% · 50% · 75% · 100%)
                   </h3>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      await onSendTestNotification();
-                      setNotice(
-                        'Dispatched a Test 3-Channel Milestone Notification! Open the Notification Bell in the header to preview the Gmail HTML & Telegram card.'
-                      );
-                    }}
-                  >
-                    <Send className="h-3.5 w-3.5" />
-                    Send Test Milestone Alert
-                  </Button>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        await onSendTestNotification();
+                        setNotice(
+                          'Dispatched a Test 3-Channel Milestone Notification! Open the Notification Bell in the header to preview the Gmail HTML & Telegram card.'
+                        );
+                      }}
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      Test Alert
+                    </Button>
+                    {unlockedSections.gateway ? (
+                      <>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          disabled={savingSettings}
+                          onClick={() => saveSection('gateway')}
+                        >
+                          <Save className="h-3.5 w-3.5" />
+                          Save
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => cancelSection('gateway')}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          Cancel
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => unlockSection('gateway')}
+                      >
+                        <Lock className="h-3.5 w-3.5 text-slate-500" />
+                        <Pencil className="h-3.5 w-3.5 text-emerald-700" />
+                        Edit
+                      </Button>
+                    )}
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <fieldset
+                  disabled={!unlockedSections.gateway}
+                  className={cn(
+                    'grid grid-cols-1 gap-3 sm:grid-cols-2 transition-opacity',
+                    !unlockedSections.gateway && 'opacity-75 [&_input]:bg-slate-100 [&_input]:text-slate-600 [&_input]:cursor-not-allowed'
+                  )}
+                >
                   <div>
                     <label className="mb-1 block text-xs font-bold text-slate-700">
                       Official Sender Gmail
@@ -1397,7 +1659,7 @@ export function AdminWorkspace({
                       placeholder="https://<project>.supabase.co/functions/v1/dispatch-notifications"
                     />
                   </div>
-                </div>
+                </fieldset>
                 <p className="text-[11px] text-slate-500">
                   Recent 3-Channel Outbox: <strong>{notifications.length}</strong> milestone
                   notifications logged across App, Gmail ({draftSettings.email_gateway?.senderEmail ?? 'support.amanat@gmail.com'}), and Telegram.
@@ -1405,17 +1667,61 @@ export function AdminWorkspace({
               </div>
 
               {/* Admin Master Password Update */}
-              <div className="pt-4 border-t border-slate-200 space-y-2">
-                <h3 className="text-sm font-extrabold text-emerald-950 flex items-center gap-1.5">
-                  <KeyRound className="h-4 w-4 text-emerald-700" />
-                  Update Admin Master Password (Gate 1)
-                </h3>
-                <Input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Leave blank to keep current password (min 6 chars)"
-                />
+              <div className="pt-4 border-t border-slate-200 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-extrabold text-emerald-950 flex items-center gap-1.5">
+                    <KeyRound className="h-4 w-4 text-emerald-700" />
+                    Update Admin Master Password (Gate 1)
+                  </h3>
+                  {unlockedSections.password ? (
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        disabled={savingSettings || newPassword.trim().length < 6}
+                        onClick={() => saveSection('password')}
+                      >
+                        <Save className="h-3.5 w-3.5" />
+                        Save
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => cancelSection('password')}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => unlockSection('password')}
+                    >
+                      <Lock className="h-3.5 w-3.5 text-slate-500" />
+                      <Pencil className="h-3.5 w-3.5 text-emerald-700" />
+                      Change Password
+                    </Button>
+                  )}
+                </div>
+                <fieldset
+                  disabled={!unlockedSections.password}
+                  className={cn(
+                    'transition-opacity',
+                    !unlockedSections.password && 'opacity-75 [&_input]:bg-slate-100 [&_input]:text-slate-600 [&_input]:cursor-not-allowed'
+                  )}
+                >
+                  <Input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Leave blank to keep current password (min 6 chars)"
+                  />
+                </fieldset>
               </div>
             </Card>
           </div>
@@ -1425,9 +1731,20 @@ export function AdminWorkspace({
               Directly synced to live database (<code>public.app_settings</code>) · Last saved:{' '}
               <strong>{new Date(settings.updated_at).toLocaleString('en-GB')}</strong>
             </p>
-            <Button type="submit" variant="gold" size="lg" disabled={savingSettings}>
+            <Button
+              type="submit"
+              variant="gold"
+              size="lg"
+              disabled={savingSettings || !anySectionUnlocked}
+            >
               <Save className="h-4 w-4" />
-              <span>{savingSettings ? 'Saving...' : 'Save All Settings & Accounts'}</span>
+              <span>
+                {savingSettings
+                  ? 'Saving...'
+                  : anySectionUnlocked
+                  ? 'Save All Unlocked Changes'
+                  : 'All Sections Locked (Safe)'}
+              </span>
             </Button>
           </div>
 
